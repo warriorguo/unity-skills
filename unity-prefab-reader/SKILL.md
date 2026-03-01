@@ -1,17 +1,17 @@
 ---
 name: unity-prefab-reader
-description: Read, browse, and query Unity 2022 prefab files with incremental tree exploration. Parses Unity's YAML-serialized prefab format and provides tree view, object inspection, component listing, search, and summary statistics.
+description: Read, browse, query, and modify Unity 2022 prefab files. Parses Unity's YAML-serialized prefab format and provides tree view, object inspection, component listing, search, summary statistics, and write operations (modify properties, rename, set-active, set-transform, add-child, remove).
 ---
 
 # Unity Prefab Reader
 
-This skill provides tools to read and browse Unity 2022 `.prefab` files without loading the entire content at once. It supports incremental tree exploration, making it practical for large prefabs (hundreds of KB).
+This skill provides tools to read, browse, and modify Unity 2022 `.prefab` files without loading the entire content at once. It supports incremental tree exploration and text-level write operations that preserve the original file format.
 
 ## Usage
 
 All commands are run via `python3 scripts/prefab_reader.py` from the `unity-prefab-reader/` directory.
 
-### Commands
+### Read Commands
 
 #### `summary` - Get an overview first
 
@@ -64,14 +64,110 @@ python3 scripts/prefab_reader.py search <prefab_path> <keyword>
 
 Case-insensitive search across all GameObject names. Results include the full hierarchy path and component list.
 
+### Write Commands
+
+#### `modify` - Modify any scalar property
+
+```bash
+python3 scripts/prefab_reader.py modify <prefab_path> <fileID> <property> <value>
+```
+
+Modifies a scalar property on any object. Supports simple properties and nested flow mapping keys (dot notation).
+
+Examples:
+```bash
+# Change a MonoBehaviour field
+python3 scripts/prefab_reader.py modify player.prefab 11400004 damage 50
+
+# Change a nested flow mapping value
+python3 scripts/prefab_reader.py modify player.prefab 400000 m_LocalPosition.y 2.5
+```
+
+#### `rename` - Rename a GameObject
+
+```bash
+python3 scripts/prefab_reader.py rename <prefab_path> <go_fileID> <new_name>
+```
+
+Example:
+```bash
+python3 scripts/prefab_reader.py rename player.prefab 100002 Torso
+```
+
+#### `set-active` - Enable/disable a GameObject
+
+```bash
+python3 scripts/prefab_reader.py set-active <prefab_path> <go_fileID> <0|1>
+```
+
+Example:
+```bash
+# Enable a disabled GameObject
+python3 scripts/prefab_reader.py set-active player.prefab 100006 1
+```
+
+#### `set-transform` - Modify Transform properties
+
+```bash
+python3 scripts/prefab_reader.py set-transform <prefab_path> <transform_fileID> [--position X Y Z] [--rotation X Y Z W] [--scale X Y Z]
+```
+
+Modifies position, rotation, and/or scale on a Transform. At least one of `--position`, `--rotation`, or `--scale` must be provided.
+
+Example:
+```bash
+python3 scripts/prefab_reader.py set-transform player.prefab 400004 --position 1 2 3 --scale 2 2 2
+```
+
+#### `add-child` - Add an empty child GameObject
+
+```bash
+python3 scripts/prefab_reader.py add-child <prefab_path> <parent_go_fileID> <name>
+```
+
+Creates a new empty GameObject with a Transform as a child of the specified parent. The new object is appended to the end of the file.
+
+Example:
+```bash
+python3 scripts/prefab_reader.py add-child player.prefab 100000 Shield
+```
+
+#### `remove` - Remove a GameObject and its descendants
+
+```bash
+python3 scripts/prefab_reader.py remove <prefab_path> <go_fileID>
+```
+
+Removes the specified GameObject, all its components, and all descendant GameObjects recursively. Also updates the parent Transform's `m_Children` list.
+
+Example:
+```bash
+# Remove Weapon and its child MuzzleFlash
+python3 scripts/prefab_reader.py remove player.prefab 100004
+```
+
 ## Recommended Workflow
 
+### Reading
 1. Run `summary` to understand the prefab's structure and size
 2. Run `tree --depth 1` to see top-level objects
 3. Identify interesting branches and expand with `tree --depth N` or drill into specific objects
 4. Use `inspect <fileID>` to see full details of specific objects
 5. Use `components <gameobject_fileID>` to understand what's attached to a GameObject
 6. Use `search` to find specific objects by name
+
+### Writing
+1. Use read commands to find the `fileID` of the object you want to modify
+2. Use `modify` for arbitrary property changes, or specialized commands (`rename`, `set-active`, `set-transform`) for common operations
+3. Use `add-child` to create new empty GameObjects in the hierarchy
+4. Use `remove` to delete GameObjects (cascades to all descendants)
+5. Verify changes with `inspect` or `tree` after writing
+
+## Design Notes
+
+- **Text-level replacement**: Write commands (`modify`, `rename`, `set-active`, `set-transform`) operate directly on the raw text, preserving the original file formatting. No YAML re-serialization occurs for these operations.
+- **Structural changes**: `add-child` and `remove` use a custom serializer that produces Unity-compatible YAML output with flow mappings for references and vectors.
+- **fileID stability**: Write operations never change existing fileIDs.
 
 ## Prefab Variant Support
 

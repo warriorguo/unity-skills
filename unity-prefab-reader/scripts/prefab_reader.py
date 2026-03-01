@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Unity Prefab Reader - Parse and browse Unity 2022 prefab files.
+"""Unity Prefab Reader - Parse, browse, and modify Unity 2022 prefab files.
 
 Supports tree browsing, object inspection, component listing,
-searching, and summary statistics for Unity YAML-serialized prefabs.
+searching, summary statistics, and write operations (modify properties,
+rename, set-active, set-transform, add-child, remove) for Unity
+YAML-serialized prefabs.
 """
 
 import argparse
+import random
 import re
 import sys
 from collections import Counter, OrderedDict
@@ -210,6 +213,305 @@ def parse_prefab(path):
         objects.append((class_id, file_id, data))
 
     return objects
+
+
+# ---------------------------------------------------------------------------
+# Raw parsing and write infrastructure
+# ---------------------------------------------------------------------------
+
+def _parse_doc_ranges(content):
+    """Parse document ranges from prefab content string.
+
+    Returns a list of dicts with keys:
+        start, end, class_id, file_id, stripped
+    """
+    doc_pattern = re.compile(r"^--- !u!(\d+) &(\d+)(?: stripped)?", re.MULTILINE)
+    matches = list(doc_pattern.finditer(content))
+
+    doc_ranges = []
+    for i, match in enumerate(matches):
+        class_id = int(match.group(1))
+        file_id = int(match.group(2))
+        stripped = " stripped" in match.group(0)
+
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+
+        doc_ranges.append({
+            "start": start,
+            "end": end,
+            "class_id": class_id,
+            "file_id": file_id,
+            "stripped": stripped,
+        })
+
+    return doc_ranges
+
+
+def parse_prefab_raw(path):
+    """Parse a prefab file returning raw content and document ranges."""
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return content, _parse_doc_ranges(content)
+
+
+def write_prefab(path, content):
+    """Write prefab content back to file, ensuring LF line endings."""
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(content)
+
+
+def format_unity_number(v):
+    """Format a number for Unity YAML. Integers render without decimal point."""
+    if isinstance(v, bool):
+        return "1" if v else "0"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if v == int(v) and v == v:  # not NaN
+            return str(int(v))
+        return str(v)
+    return str(v)
+
+
+def serialize_flow_mapping(d):
+    """Serialize a dict as Unity flow mapping, e.g. {x: 0, y: 1, z: 0}."""
+    parts = []
+    for k, v in d.items():
+        if isinstance(v, dict):
+            parts.append(f"{k}: {serialize_flow_mapping(v)}")
+        else:
+            parts.append(f"{k}: {format_unity_number(v)}")
+    return "{" + ", ".join(parts) + "}"
+
+
+# ---------------------------------------------------------------------------
+# Text-level replacement helpers
+# ---------------------------------------------------------------------------
+
+def _find_doc_range(doc_ranges, file_id):
+    """Find the document range dict for a given fileID."""
+    for dr in doc_ranges:
+        if dr["file_id"] == file_id:
+            return dr
+    return None
+
+
+def replace_flow_value(flow_str, key, new_value):
+    """Replace a single key's value in a flow mapping string like {x: 0, y: 1}."""
+    formatted = format_unity_number(new_value)
+    pattern = re.compile(r"(\b" + re.escape(key) + r":\s*)([^,}]+)")
+    result, count = pattern.subn(r"\g<1>" + formatted, flow_str)
+    if count == 0:
+        raise ValueError(f"Key '{key}' not found in flow mapping: {flow_str}")
+    return result
+
+
+def replace_scalar_value(content, doc_ranges, file_id, prop, value):
+    """Replace a scalar property value in the raw text of a document.
+
+    Supports simple properties ('damage') and nested flow properties
+    ('m_LocalPosition.x').
+    """
+    dr = _find_doc_range(doc_ranges, file_id)
+    if dr is None:
+        raise ValueError(f"fileID {file_id} not found")
+
+    doc_text = content[dr["start"]:dr["end"]]
+
+    if "." in prop:
+        parent_prop, sub_key = prop.split(".", 1)
+        pattern = re.compile(
+            r"^(\s+" + re.escape(parent_prop) + r":\s*)(\{.+\})(.*)$",
+            re.MULTILINE,
+        )
+        match = pattern.search(doc_text)
+        if not match:
+            raise ValueError(f"Property '{parent_prop}' not found in fileID {file_id}")
+
+        flow_str = match.group(2)
+        new_flow = replace_flow_value(flow_str, sub_key, value)
+        new_line = match.group(1) + new_flow + match.group(3)
+        new_doc = doc_text[:match.start()] + new_line + doc_text[match.end():]
+    else:
+        pattern = re.compile(
+            r"^(\s+" + re.escape(prop) + r":)(.*)$",
+            re.MULTILINE,
+        )
+        match = pattern.search(doc_text)
+        if not match:
+            raise ValueError(f"Property '{prop}' not found in fileID {file_id}")
+
+        if isinstance(value, str) and value == "":
+            new_line = match.group(1)
+        else:
+            val_str = format_unity_number(value) if isinstance(value, (int, float)) else str(value)
+            new_line = match.group(1) + " " + val_str
+        new_doc = doc_text[:match.start()] + new_line + doc_text[match.end():]
+
+    return content[:dr["start"]] + new_doc + content[dr["end"]:]
+
+
+def replace_flow_line(content, doc_ranges, file_id, prop, values_dict):
+    """Replace values in a flow mapping line, preserving keys not in values_dict."""
+    dr = _find_doc_range(doc_ranges, file_id)
+    if dr is None:
+        raise ValueError(f"fileID {file_id} not found")
+
+    doc_text = content[dr["start"]:dr["end"]]
+
+    pattern = re.compile(
+        r"^(\s+" + re.escape(prop) + r":\s*)(\{.+\})(.*)$",
+        re.MULTILINE,
+    )
+    match = pattern.search(doc_text)
+    if not match:
+        raise ValueError(f"Property '{prop}' not found in fileID {file_id}")
+
+    flow_str = match.group(2)
+    for key, val in values_dict.items():
+        flow_str = replace_flow_value(flow_str, key, val)
+
+    new_line = match.group(1) + flow_str + match.group(3)
+    new_doc = doc_text[:match.start()] + new_line + doc_text[match.end():]
+
+    return content[:dr["start"]] + new_doc + content[dr["end"]:]
+
+
+# ---------------------------------------------------------------------------
+# Unity YAML serialization (for structural changes)
+# ---------------------------------------------------------------------------
+
+def _serialize_field(key, value, indent):
+    """Serialize a single field for Unity YAML output."""
+    prefix = "  " * indent
+
+    if isinstance(value, dict):
+        return [f"{prefix}{key}: {serialize_flow_mapping(value)}"]
+    elif isinstance(value, list):
+        if not value:
+            return [f"{prefix}{key}: []"]
+        lines = [f"{prefix}{key}:"]
+        for item in value:
+            if isinstance(item, dict):
+                # All-scalar dict -> flow mapping: - {fileID: 0}
+                if all(not isinstance(v, (dict, list)) for v in item.values()):
+                    lines.append(f"{prefix}- {serialize_flow_mapping(item)}")
+                else:
+                    # Nested dict, e.g. - component: {fileID: N}
+                    first = True
+                    for k, v in item.items():
+                        pfx = f"{prefix}- " if first else f"{prefix}  "
+                        first = False
+                        if isinstance(v, dict):
+                            lines.append(f"{pfx}{k}: {serialize_flow_mapping(v)}")
+                        else:
+                            vs = format_unity_number(v) if not isinstance(v, str) else v
+                            lines.append(f"{pfx}{k}: {vs}")
+            else:
+                vs = format_unity_number(item) if not isinstance(item, str) else item
+                lines.append(f"{prefix}- {vs}")
+        return lines
+    else:
+        if isinstance(value, str):
+            if value == "":
+                return [f"{prefix}{key}:"]
+            return [f"{prefix}{key}: {value}"]
+        return [f"{prefix}{key}: {format_unity_number(value)}"]
+
+
+def serialize_unity_doc(class_id, file_id, type_name, fields):
+    """Generate a complete Unity YAML document block."""
+    lines = [f"--- !u!{class_id} &{file_id}"]
+    lines.append(f"{type_name}:")
+    for key, value in fields.items():
+        lines.extend(_serialize_field(key, value, indent=1))
+    return "\n".join(lines) + "\n"
+
+
+def generate_file_id(existing_ids):
+    """Generate a new unique fileID not in existing_ids."""
+    while True:
+        new_id = random.randint(1000000, 99999999)
+        if new_id not in existing_ids:
+            return new_id
+
+
+# ---------------------------------------------------------------------------
+# m_Children list manipulation
+# ---------------------------------------------------------------------------
+
+def add_to_children_list(content, doc_ranges, transform_file_id, child_transform_file_id):
+    """Add a child fileID reference to a Transform's m_Children list."""
+    dr = _find_doc_range(doc_ranges, transform_file_id)
+    if dr is None:
+        raise ValueError(f"fileID {transform_file_id} not found")
+
+    doc_text = content[dr["start"]:dr["end"]]
+
+    # Try empty list first: m_Children: []
+    empty_pattern = re.compile(r"^(\s+)m_Children:\s*\[\]", re.MULTILINE)
+    match = empty_pattern.search(doc_text)
+    if match:
+        indent = match.group(1)
+        replacement = f"{indent}m_Children:\n{indent}- {{fileID: {child_transform_file_id}}}"
+        new_doc = doc_text[:match.start()] + replacement + doc_text[match.end():]
+        return content[:dr["start"]] + new_doc + content[dr["end"]:]
+
+    # Multi-line list: find last - {fileID: N} entry under m_Children
+    children_pattern = re.compile(r"^(\s+)m_Children:", re.MULTILINE)
+    match = children_pattern.search(doc_text)
+    if not match:
+        raise ValueError(f"m_Children not found in fileID {transform_file_id}")
+
+    indent = match.group(1)
+    item_pattern = re.compile(
+        r"^" + re.escape(indent) + r"- \{fileID: \d+\}", re.MULTILINE
+    )
+    items = list(item_pattern.finditer(doc_text))
+    if not items:
+        raise ValueError("m_Children list format not recognized")
+
+    last_item = items[-1]
+    insert_pos = last_item.end()
+    new_entry = f"\n{indent}- {{fileID: {child_transform_file_id}}}"
+    new_doc = doc_text[:insert_pos] + new_entry + doc_text[insert_pos:]
+
+    return content[:dr["start"]] + new_doc + content[dr["end"]:]
+
+
+def remove_from_children_list(content, doc_ranges, parent_transform_file_id, child_transform_file_id):
+    """Remove a child fileID reference from a Transform's m_Children list."""
+    dr = _find_doc_range(doc_ranges, parent_transform_file_id)
+    if dr is None:
+        raise ValueError(f"fileID {parent_transform_file_id} not found")
+
+    doc_text = content[dr["start"]:dr["end"]]
+
+    # Find and remove the specific child entry
+    entry_pattern = re.compile(
+        r"\n(\s+)- \{fileID: " + str(child_transform_file_id) + r"\}"
+    )
+    match = entry_pattern.search(doc_text)
+    if not match:
+        raise ValueError(
+            f"Child fileID {child_transform_file_id} not found in "
+            f"m_Children of {parent_transform_file_id}"
+        )
+
+    indent = match.group(1)
+    new_doc = doc_text[:match.start()] + doc_text[match.end():]
+
+    # Check if m_Children is now empty
+    remaining_pattern = re.compile(
+        r"^" + re.escape(indent) + r"- \{fileID: \d+\}", re.MULTILINE
+    )
+    if not remaining_pattern.search(new_doc):
+        children_line = re.compile(r"^(\s+)m_Children:\s*$", re.MULTILINE)
+        new_doc = children_line.sub(r"\1m_Children: []", new_doc)
+
+    return content[:dr["start"]] + new_doc + content[dr["end"]:]
 
 
 # ---------------------------------------------------------------------------
@@ -670,13 +972,236 @@ def cmd_summary(args):
 
 
 # ---------------------------------------------------------------------------
+# Write subcommands
+# ---------------------------------------------------------------------------
+
+def cmd_modify(args):
+    """Modify an arbitrary scalar property on any object."""
+    content, doc_ranges = parse_prefab_raw(args.prefab_path)
+    file_id = int(args.file_id)
+
+    # Try to interpret value as number
+    value = args.value
+    try:
+        if "." in value:
+            value = float(value)
+        else:
+            value = int(value)
+    except ValueError:
+        pass  # keep as string
+
+    content = replace_scalar_value(content, doc_ranges, file_id, args.property, value)
+    write_prefab(args.prefab_path, content)
+    print(f"Modified {args.property} = {value} on &{file_id}")
+
+
+def cmd_rename(args):
+    """Rename a GameObject."""
+    content, doc_ranges = parse_prefab_raw(args.prefab_path)
+    go_fid = int(args.go_file_id)
+    content = replace_scalar_value(content, doc_ranges, go_fid, "m_Name", args.new_name)
+    write_prefab(args.prefab_path, content)
+    print(f"Renamed GameObject &{go_fid} to '{args.new_name}'")
+
+
+def cmd_set_active(args):
+    """Enable or disable a GameObject."""
+    content, doc_ranges = parse_prefab_raw(args.prefab_path)
+    go_fid = int(args.go_file_id)
+    active = int(args.active)
+    content = replace_scalar_value(content, doc_ranges, go_fid, "m_IsActive", active)
+    write_prefab(args.prefab_path, content)
+    state = "active" if active else "inactive"
+    print(f"Set GameObject &{go_fid} to {state}")
+
+
+def cmd_set_transform(args):
+    """Modify Transform position, rotation, and/or scale."""
+    content, doc_ranges = parse_prefab_raw(args.prefab_path)
+    file_id = int(args.file_id)
+
+    if args.position:
+        x, y, z = [float(v) for v in args.position]
+        content = replace_flow_line(
+            content, doc_ranges, file_id, "m_LocalPosition",
+            {"x": x, "y": y, "z": z},
+        )
+        doc_ranges = _parse_doc_ranges(content)
+
+    if args.rotation:
+        x, y, z, w = [float(v) for v in args.rotation]
+        content = replace_flow_line(
+            content, doc_ranges, file_id, "m_LocalRotation",
+            {"x": x, "y": y, "z": z, "w": w},
+        )
+        doc_ranges = _parse_doc_ranges(content)
+
+    if args.scale:
+        x, y, z = [float(v) for v in args.scale]
+        content = replace_flow_line(
+            content, doc_ranges, file_id, "m_LocalScale",
+            {"x": x, "y": y, "z": z},
+        )
+
+    write_prefab(args.prefab_path, content)
+    print(f"Updated Transform &{file_id}")
+
+
+def cmd_add_child(args):
+    """Add an empty child GameObject with a Transform."""
+    content, doc_ranges = parse_prefab_raw(args.prefab_path)
+    parent_go_fid = int(args.parent_go_file_id)
+    name = args.name
+
+    # Parse structure to find parent transform
+    objects = parse_prefab(args.prefab_path)
+    by_id, game_objects, transforms = build_index(objects)
+
+    if parent_go_fid not in game_objects:
+        print(f"Error: GameObject &{parent_go_fid} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    # Find parent transform
+    parent_transform_fid = None
+    for t_fid, t_data in transforms.items():
+        go_ref = _ref_id(t_data.get("m_GameObject", {}))
+        if go_ref == parent_go_fid:
+            parent_transform_fid = t_fid
+            break
+
+    if parent_transform_fid is None:
+        print(f"Error: Transform for GameObject &{parent_go_fid} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    # Determine m_RootOrder from existing children count
+    parent_t_data = transforms[parent_transform_fid]
+    existing_children = parent_t_data.get("m_Children", [])
+    root_order = len(existing_children)
+
+    # Generate unique fileIDs
+    existing_ids = set(dr["file_id"] for dr in doc_ranges)
+    go_fid = generate_file_id(existing_ids)
+    existing_ids.add(go_fid)
+    transform_fid = generate_file_id(existing_ids)
+
+    # Create GameObject document
+    go_fields = OrderedDict([
+        ("m_ObjectHideFlags", 0),
+        ("m_CorrespondingSourceObject", {"fileID": 0}),
+        ("m_PrefabInstance", {"fileID": 0}),
+        ("m_PrefabAsset", {"fileID": 0}),
+        ("serializedVersion", 6),
+        ("m_Component", [{"component": {"fileID": transform_fid}}]),
+        ("m_Layer", 0),
+        ("m_Name", name),
+        ("m_TagString", "Untagged"),
+        ("m_Icon", {"fileID": 0}),
+        ("m_NavMeshLayer", 0),
+        ("m_StaticEditorFlags", 0),
+        ("m_IsActive", 1),
+    ])
+    go_doc = serialize_unity_doc(1, go_fid, "GameObject", go_fields)
+
+    # Create Transform document
+    t_fields = OrderedDict([
+        ("m_ObjectHideFlags", 0),
+        ("m_CorrespondingSourceObject", {"fileID": 0}),
+        ("m_PrefabInstance", {"fileID": 0}),
+        ("m_PrefabAsset", {"fileID": 0}),
+        ("m_GameObject", {"fileID": go_fid}),
+        ("serializedVersion", 2),
+        ("m_LocalRotation", {"x": 0, "y": 0, "z": 0, "w": 1}),
+        ("m_LocalPosition", {"x": 0, "y": 0, "z": 0}),
+        ("m_LocalScale", {"x": 1, "y": 1, "z": 1}),
+        ("m_ConstrainProportionsScale", 0),
+        ("m_Children", []),
+        ("m_Father", {"fileID": parent_transform_fid}),
+        ("m_RootOrder", root_order),
+        ("m_LocalEulerAnglesHint", {"x": 0, "y": 0, "z": 0}),
+    ])
+    t_doc = serialize_unity_doc(4, transform_fid, "Transform", t_fields)
+
+    # Append documents to end of file
+    content = content.rstrip("\n") + "\n" + go_doc + t_doc
+
+    # Update parent transform's m_Children
+    doc_ranges = _parse_doc_ranges(content)
+    content = add_to_children_list(content, doc_ranges, parent_transform_fid, transform_fid)
+
+    write_prefab(args.prefab_path, content)
+    print(f"Added child '{name}' (GO &{go_fid}, Transform &{transform_fid}) to parent &{parent_go_fid}")
+
+
+def cmd_remove(args):
+    """Remove a GameObject and all its descendants."""
+    content, doc_ranges = parse_prefab_raw(args.prefab_path)
+    go_fid = int(args.go_file_id)
+
+    # Parse structure
+    objects = parse_prefab(args.prefab_path)
+    by_id, game_objects, transforms = build_index(objects)
+    _, children_map, go_transform, go_components = build_tree(
+        game_objects, transforms, by_id
+    )
+
+    if go_fid not in game_objects:
+        print(f"Error: GameObject &{go_fid} not found.", file=sys.stderr)
+        sys.exit(1)
+
+    # Recursively collect all descendant GO fileIDs
+    def collect_descendants(fid):
+        result = [fid]
+        for child in children_map.get(fid, []):
+            result.extend(collect_descendants(child))
+        return result
+
+    all_go_fids = collect_descendants(go_fid)
+
+    # Collect all document fileIDs associated with these GOs
+    fids_to_remove = set()
+    for gf in all_go_fids:
+        fids_to_remove.add(gf)  # The GO itself
+        t_data = go_transform.get(gf)
+        if t_data:
+            fids_to_remove.add(t_data["_fileID"])
+        for _, comp_fid in go_components.get(gf, []):
+            fids_to_remove.add(comp_fid)
+
+    # Remove from parent transform's m_Children
+    t_data = go_transform.get(go_fid)
+    if t_data:
+        father_ref = t_data.get("m_Father", {})
+        father_t_fid = _ref_id(father_ref)
+        if father_t_fid:
+            content = remove_from_children_list(
+                content, doc_ranges, father_t_fid, t_data["_fileID"]
+            )
+            doc_ranges = _parse_doc_ranges(content)
+
+    # Delete document blocks from end to start (preserves earlier offsets)
+    ranges_to_delete = sorted(
+        [dr for dr in doc_ranges if dr["file_id"] in fids_to_remove],
+        key=lambda dr: dr["start"],
+        reverse=True,
+    )
+
+    for dr in ranges_to_delete:
+        content = content[:dr["start"]] + content[dr["end"]:]
+
+    write_prefab(args.prefab_path, content)
+    names = [_go_name(game_objects, fid) for fid in all_go_fids]
+    print(f"Removed {len(all_go_fids)} GameObject(s): {', '.join(names)}")
+    print(f"Deleted {len(fids_to_remove)} document(s) total")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
         prog="prefab_reader",
-        description="Read and browse Unity 2022 prefab files.",
+        description="Read, browse, and modify Unity 2022 prefab files.",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -708,6 +1233,52 @@ def main():
     p_summary = subparsers.add_parser("summary", help="Show prefab statistics summary")
     p_summary.add_argument("prefab_path", help="Path to the .prefab file")
     p_summary.set_defaults(func=cmd_summary)
+
+    # --- Write commands ---
+
+    # modify
+    p_modify = subparsers.add_parser("modify", help="Modify a scalar property value")
+    p_modify.add_argument("prefab_path", help="Path to the .prefab file")
+    p_modify.add_argument("file_id", help="The fileID of the object to modify")
+    p_modify.add_argument("property", help="Property name (e.g. 'damage' or 'm_LocalPosition.x')")
+    p_modify.add_argument("value", help="New value")
+    p_modify.set_defaults(func=cmd_modify)
+
+    # rename
+    p_rename = subparsers.add_parser("rename", help="Rename a GameObject")
+    p_rename.add_argument("prefab_path", help="Path to the .prefab file")
+    p_rename.add_argument("go_file_id", help="The fileID of the GameObject")
+    p_rename.add_argument("new_name", help="New name for the GameObject")
+    p_rename.set_defaults(func=cmd_rename)
+
+    # set-active
+    p_set_active = subparsers.add_parser("set-active", help="Enable/disable a GameObject")
+    p_set_active.add_argument("prefab_path", help="Path to the .prefab file")
+    p_set_active.add_argument("go_file_id", help="The fileID of the GameObject")
+    p_set_active.add_argument("active", choices=["0", "1"], help="1=active, 0=inactive")
+    p_set_active.set_defaults(func=cmd_set_active)
+
+    # set-transform
+    p_set_transform = subparsers.add_parser("set-transform", help="Modify Transform properties")
+    p_set_transform.add_argument("prefab_path", help="Path to the .prefab file")
+    p_set_transform.add_argument("file_id", help="The fileID of the Transform")
+    p_set_transform.add_argument("--position", nargs=3, metavar=("X", "Y", "Z"), help="Local position")
+    p_set_transform.add_argument("--rotation", nargs=4, metavar=("X", "Y", "Z", "W"), help="Local rotation quaternion")
+    p_set_transform.add_argument("--scale", nargs=3, metavar=("X", "Y", "Z"), help="Local scale")
+    p_set_transform.set_defaults(func=cmd_set_transform)
+
+    # add-child
+    p_add_child = subparsers.add_parser("add-child", help="Add an empty child GameObject")
+    p_add_child.add_argument("prefab_path", help="Path to the .prefab file")
+    p_add_child.add_argument("parent_go_file_id", help="The fileID of the parent GameObject")
+    p_add_child.add_argument("name", help="Name for the new child GameObject")
+    p_add_child.set_defaults(func=cmd_add_child)
+
+    # remove
+    p_remove = subparsers.add_parser("remove", help="Remove a GameObject and its descendants")
+    p_remove.add_argument("prefab_path", help="Path to the .prefab file")
+    p_remove.add_argument("go_file_id", help="The fileID of the GameObject to remove")
+    p_remove.set_defaults(func=cmd_remove)
 
     args = parser.parse_args()
     if not args.command:
