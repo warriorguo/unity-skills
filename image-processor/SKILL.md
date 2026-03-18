@@ -1,6 +1,6 @@
 ---
 name: image-processor
-description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF), or remove a specific color from an image (make it transparent). Trigger this even for casual requests like "make this image smaller", "what size is this image", "show me the EXIF data", or "remove the background color".
+description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF), remove a specific color from an image (make it transparent), or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", or "add a background to this sprite".
 ---
 
 # Image Processor
@@ -153,6 +153,48 @@ python <skill-path>/scripts/remove_color.py photo.png result.png --color '00FF00
 Remove black pixels with small tolerance, using R,G,B format:
 ```bash
 python <skill-path>/scripts/remove_color.py sprite.png clean.png --color '0,0,0' --tolerance 10
+```
+
+## Add Background
+
+Use `scripts/add_background.py` to composite a foreground image (with transparency) onto a background image. Automatically detects Unity sliced sprite sheets and processes each tile individually.
+
+### Usage
+
+```bash
+python <skill-path>/scripts/add_background.py <foreground> <background> <output> [options]
+```
+
+### Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--no-unity` | Skip Unity .meta detection; treat as a plain image | `--no-unity` |
+| `--quality Q` | JPEG/WEBP quality 1-100 (default: 95) | `--quality 85` |
+
+### Behavior
+
+- The **foreground** is the image with transparency (e.g., a character sprite).
+- The **background** is resized to match the foreground (or tile) dimensions before compositing.
+- **Unity sprite sheet detection**: If a `.meta` file exists next to the foreground image and `spriteMode` is `2` (Multiple), the script reads all sprite rects from the meta file and composites the background onto each tile independently. This ensures each slice gets a properly fitted background rather than one stretched across the whole sheet.
+- For non-Unity images (or with `--no-unity`), the entire foreground is composited onto the background as a single image.
+- Supports PNG, WEBP (with transparency), and JPEG (auto-converts to RGB) output.
+
+### Examples
+
+Plain image — add background:
+```bash
+python <skill-path>/scripts/add_background.py character.png grass.png result.png
+```
+
+Unity sprite sheet — auto-detects .meta and processes per-tile:
+```bash
+python <skill-path>/scripts/add_background.py spritesheet.png bg_texture.png spritesheet_with_bg.png
+```
+
+Force plain mode even if .meta exists:
+```bash
+python <skill-path>/scripts/add_background.py spritesheet.png bg.png out.png --no-unity
 ```
 
 ## Important notes
