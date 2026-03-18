@@ -1,6 +1,6 @@
 ---
 name: image-processor
-description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF), remove a specific color from an image (make it transparent), or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", or "add a background to this sprite".
+description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF), remove a specific color from an image (make it transparent), adjust image opacity/transparency, rotate or flip images, or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", "make it semi-transparent", "rotate this image 90 degrees", "flip the image", or "add a background to this sprite".
 ---
 
 # Image Processor
@@ -155,6 +155,88 @@ Remove black pixels with small tolerance, using R,G,B format:
 python <skill-path>/scripts/remove_color.py sprite.png clean.png --color '0,0,0' --tolerance 10
 ```
 
+## Adjust Opacity
+
+Use `scripts/opacity.py` to adjust the transparency of an image by scaling its alpha channel.
+
+### Usage
+
+```bash
+python <skill-path>/scripts/opacity.py <input> <output> --opacity <0.0-1.0>
+```
+
+### Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--opacity V` | **(Required)** Opacity factor: `0.0` = fully transparent, `0.5` = half transparent, `1.0` = original | `--opacity 0.5` |
+
+### Behavior
+
+- The output format **must support transparency** (PNG or WEBP). JPEG/BMP will be rejected.
+- The original alpha channel is preserved proportionally — already-transparent pixels stay more transparent than opaque ones.
+
+### Examples
+
+Make an image 50% transparent:
+```bash
+python <skill-path>/scripts/opacity.py icon.png icon_half.png --opacity 0.5
+```
+
+Make nearly invisible (10% opacity):
+```bash
+python <skill-path>/scripts/opacity.py overlay.png faded.png --opacity 0.1
+```
+
+## Rotate / Flip
+
+Use `scripts/rotate.py` to rotate an image by any angle or flip it horizontally/vertically.
+
+### Usage
+
+```bash
+python <skill-path>/scripts/rotate.py <input> <output> [options]
+```
+
+### Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--angle A` | Rotation angle in degrees (counter-clockwise). Negative = clockwise. | `--angle 90` |
+| `--flip DIR` | Flip: `horizontal`, `vertical`, or `both` | `--flip horizontal` |
+| `--expand` | Expand canvas to fit rotated image (default: crop to original size) | `--expand` |
+| `--bg-color C` | Background color for empty areas as `R,G,B` or `R,G,B,A` (default: `0,0,0,0` transparent) | `--bg-color '255,255,255'` |
+| `--quality Q` | JPEG/WEBP quality 1-100 (default: 95) | `--quality 85` |
+
+### Behavior
+
+- 90/180/270 degree rotations use fast lossless transpose.
+- Arbitrary angles use bicubic interpolation.
+- `--flip` is applied before `--angle`, so both can be combined.
+- Without `--expand`, the canvas stays the original size and corners may be cropped.
+
+### Examples
+
+Rotate 90 degrees counter-clockwise:
+```bash
+python <skill-path>/scripts/rotate.py photo.jpg rotated.jpg --angle 90
+```
+
+Rotate 45 degrees with expanded canvas:
+```bash
+python <skill-path>/scripts/rotate.py icon.png tilted.png --angle 45 --expand
+```
+
+Flip horizontally (mirror):
+```bash
+python <skill-path>/scripts/rotate.py sprite.png mirrored.png --flip horizontal
+```
+
+Flip and rotate combined:
+```bash
+python <skill-path>/scripts/rotate.py char.png result.png --flip vertical --angle 90
+```
+
 ## Add Background
 
 Use `scripts/add_background.py` to composite a foreground image (with transparency) onto a background image. Automatically detects Unity sliced sprite sheets and processes each tile individually.
@@ -169,13 +251,14 @@ python <skill-path>/scripts/add_background.py <foreground> <background> <output>
 
 | Option | Description | Example |
 |--------|-------------|---------|
+| `--no-resize` | Do not resize the background; center it behind the foreground at original size | `--no-resize` |
 | `--no-unity` | Skip Unity .meta detection; treat as a plain image | `--no-unity` |
 | `--quality Q` | JPEG/WEBP quality 1-100 (default: 95) | `--quality 85` |
 
 ### Behavior
 
 - The **foreground** is the image with transparency (e.g., a character sprite).
-- The **background** is resized to match the foreground (or tile) dimensions before compositing.
+- By default the **background** is resized to match the foreground (or tile) dimensions. With `--no-resize`, the background keeps its original size and is centered behind the foreground/tile.
 - **Unity sprite sheet detection**: If a `.meta` file exists next to the foreground image and `spriteMode` is `2` (Multiple), the script reads all sprite rects from the meta file and composites the background onto each tile independently. This ensures each slice gets a properly fitted background rather than one stretched across the whole sheet.
 - For non-Unity images (or with `--no-unity`), the entire foreground is composited onto the background as a single image.
 - Supports PNG, WEBP (with transparency), and JPEG (auto-converts to RGB) output.
