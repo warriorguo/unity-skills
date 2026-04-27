@@ -13,7 +13,7 @@ editing prefab YAML, and end-to-end importing of new assets.
 | [`unity-sprite-slicer`](unity-sprite-slicer/SKILL.md) | Slice a sprite texture into a `rows × cols` grid by editing the `.meta` file (Grid by Cell Count). |
 | [`unity-animation-editor`](unity-animation-editor/SKILL.md) | Create and modify `.anim` and `.controller` files — sprite flipbook clips and AnimatorControllers. |
 | [`unity-prefab-reader`](unity-prefab-reader/SKILL.md) | Browse, query, and modify Unity prefab YAML — tree view, component inspection, property edits, transform/active/child operations. |
-| [`import-asset`](import-asset/SKILL.md) | One-shot importer with config-driven, idempotent pipelines. Ships pipelines for `leg-icon`, `leg-walk`, `leg-track`, `enemy-sprite`, and `sound-effect`. |
+| [`import-asset`](import-asset/SKILL.md) | One-shot importer with config-driven, idempotent pipelines. Ships pipelines for `leg-icon`, `leg-walk`, `leg-track`, `enemy-sprite`, `sound-effect`, and `effect-sprite`. |
 
 ## Installation
 

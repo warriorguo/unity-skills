@@ -41,6 +41,7 @@ shipped in their own tickets:
 | `leg-track` | Resize 128² → 1-frame Walk/Idle anim → ResourcesDB → LegData(track)/ItemData/loot | implemented |
 | `enemy-sprite` | Copy → slice → SpriteAnimationData → ResourcesDB `anim/{id}` → optional CharacterAnimConfig | implemented |
 | `sound-effect` | Copy to `Assets/Audio/SFX/` → await .meta → register in `SoundConfig.asset` | implemented |
+| `effect-sprite` | Copy → slice → build `SpriteSheet{Name}.prefab` (matching the SpriteSheetSmoke template, inline `_frames`) → register `fx/{id}` in ResourcesDB. Output is FxSpawner-compatible. | implemented |
 
 Add a new type by dropping a new file under `pipelines/`. No code changes are
 required for the common case.

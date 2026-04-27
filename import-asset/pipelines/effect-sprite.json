@@ -1,0 +1,57 @@
+{
+  "name": "effect-sprite",
+  "description": "Import a visual effect sprite sheet (gas, smoke, explosion, etc.) end-to-end as an fx/{name} prefab consumable by FxSpawner.Spawn. Copies the PNG, slices rows x cols, generates a SpriteSheet{Name} prefab matching the SpriteSheetSmoke template (root + initially-inactive child with SpriteRenderer + SpriteAnimation MonoBehaviour with inline _frames), and registers fx/{name} in ResourcesDB.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "Lowercase fx id (e.g. gas)" },
+    { "name": "rows", "type": "int", "required": true, "help": "Sprite sheet rows" },
+    { "name": "cols", "type": "int", "required": true, "help": "Sprite sheet columns" },
+    { "name": "fps",  "type": "int", "default": 24, "help": "Animation FPS (matches existing SpriteSheet* prefabs)" },
+    { "name": "loop", "default": "false", "choices": ["true", "false"], "help": "Loop the animation (default false, matches existing one-shot effects)" },
+    { "name": "sorting-layer", "type": "int", "default": 5, "help": "SpriteRenderer m_SortingLayer" },
+    { "name": "sorting-order", "type": "int", "default": 10, "help": "SpriteRenderer m_SortingOrder" },
+    { "name": "script-guid", "default": "", "help": "GUID of SpriteAnimation.cs (auto-detect if empty)" },
+    { "name": "child-name", "default": "", "help": "Child GameObject m_Name (default: {name}_01)" },
+    { "name": "effect-img-dir", "default": "Assets/Images/Effects", "help": "Effect images root" },
+    { "name": "effect-prefab-dir", "default": "Assets/Prefabs/Effects", "help": "Effect prefabs root" },
+    { "name": "resources-db", "default": "Assets/Prefabs/System/ResourcesDB.asset", "help": "ResourcesDB.asset path" }
+  ],
+  "steps": [
+    { "type": "set-var", "var": "child_final",
+      "value": "'{child_name}' if '{child_name}' else '{name}_01'", "eval": true },
+    {
+      "type": "copy",
+      "source": "{source}",
+      "dest": "{unity_project}/{effect_img_dir}/{Name}/{Name}.png"
+    },
+    { "type": "await-meta", "path": "{unity_project}/{effect_img_dir}/{Name}/{Name}.png" },
+    {
+      "type": "run-script",
+      "script": "unity-sprite-slicer/scripts/sprite_slicer.py",
+      "args": ["slice", "{unity_project}/{effect_img_dir}/{Name}/{Name}.png", "{rows}", "{cols}"]
+    },
+    {
+      "type": "run-script",
+      "script": "import-asset/scripts/write_effect_prefab.py",
+      "args": [
+        "{unity_project}/{effect_prefab_dir}/{Name}/SpriteSheet{Name}.prefab",
+        "{unity_project}/{effect_img_dir}/{Name}/{Name}.png",
+        "--root-name", "SpriteSheet{Name}",
+        "--child-name", "{child_final}",
+        "--fps", "{fps}",
+        "--loop", "{loop}",
+        "--sorting-layer", "{sorting_layer}",
+        "--sorting-order", "{sorting_order}",
+        "--unity-project", "{unity_project}"
+      ]
+    },
+    { "type": "await-meta", "path": "{unity_project}/{effect_prefab_dir}/{Name}/SpriteSheet{Name}.prefab" },
+    { "type": "read-meta",  "path": "{unity_project}/{effect_prefab_dir}/{Name}/SpriteSheet{Name}.prefab", "guid_var": "prefab_guid" },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*_entries:\\s*$",
+      "marker": "key: fx/{name}\n",
+      "insert": "\n  - key: fx/{name}\n    asset: {fileID: 100000, guid: {prefab_guid}, type: 3}"
+    }
+  ]
+}
