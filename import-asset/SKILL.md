@@ -162,6 +162,31 @@ a no-op. Otherwise, `insert` is placed immediately after the regex match for
 `anchor`. `anchor` is matched in MULTILINE mode against the file text. Use
 this for ResourcesDB / SoundConfig / loot-table registrations.
 
+### `set-var`
+
+```json
+{ "type": "set-var", "var": "width", "value": "{cols} * {cell_size}", "eval": true }
+{ "type": "set-var", "var": "loot_table",
+  "value": "'loot_rare' if '{rarity}' == 'rare' else 'loot_common'", "eval": true }
+```
+
+Binds a context variable for use in later step templates. With `eval: true`
+the rendered value is evaluated as a restricted Python expression (no
+builtins, no names) — useful for arithmetic and conditional mapping.
+
+### `json-list-append`
+
+```json
+{ "type": "json-list-append",
+  "path": "{unity_project}/GameData/loot/loot_common.json",
+  "list": "drops",
+  "item": { "itemId": "legs_{name}", "weight": 1.0 },
+  "match_keys": ["itemId"] }
+```
+
+Appends an object to a JSON list, idempotent on `match_keys`. The file is
+created if missing. `list` is a dot-path to the target array.
+
 ### `md-append`
 
 ```json

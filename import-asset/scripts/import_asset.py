@@ -224,6 +224,64 @@ def step_text_insert(args: dict, ctx: dict, dry_run: bool):
     path.write_text(new_text)
 
 
+def step_set_var(args: dict, ctx: dict, dry_run: bool):
+    """Set a context variable. With eval=true, value is evaluated as a Python
+    expression (no builtins, no names) — useful for arithmetic and conditionals.
+    """
+    var = args["var"]
+    raw = args["value"]
+    if isinstance(raw, str):
+        rendered = render(raw, ctx)
+    else:
+        rendered = raw
+    if args.get("eval"):
+        try:
+            value = eval(rendered, {"__builtins__": {}}, {})
+        except Exception as e:
+            raise PipelineError(f"set-var '{var}': eval failed for {rendered!r}: {e}")
+    else:
+        value = rendered
+    ctx[var] = value
+    print(f"[set-var] {var} = {value!r}")
+
+
+def step_json_list_append(args: dict, ctx: dict, dry_run: bool):
+    """Idempotently append an object to a list inside a JSON file.
+
+    `list` is a dot-path to the target list (created on demand). `match_keys`
+    declares which keys identify duplicates — if an existing item matches on
+    all those keys, the step is a no-op.
+    """
+    path = Path(render(args["path"], ctx))
+    list_key = render(args["list"], ctx)
+    item = render_obj(args["item"], ctx)
+    match_keys = args.get("match_keys", [])
+    print(f"[json-list-append] {path} .{list_key} += {item}")
+    if dry_run:
+        return
+    if path.exists():
+        data = json.loads(path.read_text())
+    else:
+        data = {}
+    container = data
+    parts = list_key.split(".")
+    for p in parts[:-1]:
+        container = container.setdefault(p, {})
+    last = parts[-1]
+    items = container.setdefault(last, [])
+    if not isinstance(items, list):
+        raise PipelineError(f"json-list-append: {list_key} is not a list in {path}")
+    for existing in items:
+        if isinstance(existing, dict) and all(
+            existing.get(k) == item.get(k) for k in match_keys
+        ):
+            print(f"  skip: existing entry matches on {match_keys}")
+            return
+    items.append(item)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
 def step_md_append(args: dict, ctx: dict, dry_run: bool):
     path = Path(render(args["path"], ctx))
     content = render(args["content"], ctx)
@@ -253,6 +311,8 @@ STEPS = {
     "write-json": step_write_json,
     "text-insert": step_text_insert,
     "md-append": step_md_append,
+    "set-var": step_set_var,
+    "json-list-append": step_json_list_append,
 }
 
 

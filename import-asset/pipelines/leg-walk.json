@@ -1,0 +1,118 @@
+{
+  "name": "leg-walk",
+  "description": "Import a walk-type leg sprite sheet end-to-end: resize, slice, generate Walk + Idle SpriteAnimationData .asset files, register anim/{name}_walk and anim/{name}_idle in ResourcesDB, write LegData and ItemData JSON, add to the appropriate loot table by rarity, and update the PlayerAssembly catalog.",
+  "arguments": [
+    { "name": "name",  "required": true, "help": "Lowercase id (e.g. heavylegs)" },
+    { "name": "rows",  "type": "int", "required": true, "help": "Sprite sheet rows" },
+    { "name": "cols",  "type": "int", "required": true, "help": "Sprite sheet columns" },
+    { "name": "fps",   "type": "int", "default": 12, "help": "Walk animation FPS" },
+    { "name": "rarity", "default": "common", "choices": ["common", "uncommon", "rare", "boss"], "help": "Drop rarity" },
+    { "name": "cell-size", "type": "int", "default": 64, "help": "Per-cell px after resize" },
+    { "name": "script-guid", "default": "", "help": "GUID of SpriteAnimationData.cs (auto-detect if empty)" },
+    { "name": "legs-dir", "default": "Assets/Images/Characters/Player/Legs", "help": "Sprite directory" },
+    { "name": "anim-dir", "default": "Assets/Animations/Player/Legs", "help": "SpriteAnimationData .asset directory" },
+    { "name": "resources-db", "default": "Assets/Resources/ResourcesDB.asset" },
+    { "name": "items-dir", "default": "GameData/items" },
+    { "name": "legs-data-dir", "default": "GameData/legs" },
+    { "name": "loot-dir", "default": "GameData/loot" },
+    { "name": "catalog", "default": "Assets/Images/Characters/Player/PlayerAssembly.md" }
+  ],
+  "steps": [
+    { "type": "set-var", "var": "width",  "value": "{cols} * {cell_size}", "eval": true },
+    { "type": "set-var", "var": "height", "value": "{rows} * {cell_size}", "eval": true },
+    { "type": "set-var", "var": "loot_table",
+      "value": "'loot_boss' if '{rarity}' == 'boss' else ('loot_rare' if '{rarity}' == 'rare' else 'loot_common')",
+      "eval": true },
+    {
+      "type": "resize",
+      "source": "{source}",
+      "dest": "{unity_project}/{legs_dir}/{Name}.png",
+      "width": "{width}",
+      "height": "{height}"
+    },
+    { "type": "await-meta", "path": "{unity_project}/{legs_dir}/{Name}.png" },
+    {
+      "type": "run-script",
+      "script": "unity-sprite-slicer/scripts/sprite_slicer.py",
+      "args": ["slice", "{unity_project}/{legs_dir}/{Name}.png", "{rows}", "{cols}"]
+    },
+    {
+      "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{name}_walk.asset",
+        "{unity_project}/{legs_dir}/{Name}.png",
+        "--name", "{name}_walk",
+        "--fps", "{fps}",
+        "--loop",
+        "--unity-project", "{unity_project}"
+      ]
+    },
+    {
+      "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{name}_idle.asset",
+        "{unity_project}/{legs_dir}/{Name}.png",
+        "--name", "{name}_idle",
+        "--fps", "1",
+        "--loop",
+        "--frames", "0",
+        "--unity-project", "{unity_project}"
+      ]
+    },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{name}_walk.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{name}_walk.asset", "guid_var": "walk_guid" },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{name}_idle.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{name}_idle.asset", "guid_var": "idle_guid" },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "key: anim/{name}_walk",
+      "insert": "\n    - key: anim/{name}_walk\n      value: {fileID: 11400000, guid: {walk_guid}, type: 2}"
+    },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "key: anim/{name}_idle",
+      "insert": "\n    - key: anim/{name}_idle\n      value: {fileID: 11400000, guid: {idle_guid}, type: 2}"
+    },
+    {
+      "type": "write-json",
+      "path": "{unity_project}/{legs_data_dir}/{name}.json",
+      "merge": true,
+      "content": {
+        "id": "{name}",
+        "legType": "walk",
+        "walkAnimKey": "anim/{name}_walk",
+        "idleAnimKey": "anim/{name}_idle"
+      }
+    },
+    {
+      "type": "write-json",
+      "path": "{unity_project}/{items_dir}/legs_{name}.json",
+      "merge": true,
+      "content": {
+        "id": "legs_{name}",
+        "type": "legs",
+        "refId": "{name}",
+        "rarity": "{rarity}"
+      }
+    },
+    {
+      "type": "json-list-append",
+      "path": "{unity_project}/{loot_dir}/{loot_table}.json",
+      "list": "drops",
+      "item": { "itemId": "legs_{name}", "weight": 1.0 },
+      "match_keys": ["itemId"]
+    },
+    {
+      "type": "md-append",
+      "path": "{unity_project}/{catalog}",
+      "marker": "### {Name} (walk legs)",
+      "content": "### {Name} (walk legs)\n\n- Sheet: `{legs_dir}/{Name}.png` ({width}x{height}, {rows}x{cols} grid)\n- Walk anim: `{anim_dir}/{name}_walk.asset` @ {fps} fps\n- Idle anim: `{anim_dir}/{name}_idle.asset`\n- Item: `legs_{name}` (rarity: {rarity}, loot: `{loot_table}`)\n"
+    }
+  ]
+}
