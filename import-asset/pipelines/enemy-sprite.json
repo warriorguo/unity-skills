@@ -1,0 +1,56 @@
+{
+  "name": "enemy-sprite",
+  "description": "Import an enemy sprite sheet: copy under Assets/Images/Characters/{Name}/{Name}.png, slice rows x cols, generate a SpriteAnimationData .asset with all frames, register as anim/{name} in ResourcesDB, and append a row to the enemy catalog. CharacterAnimConfig generation is optional and project-specific — left as a manual follow-up.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "Lowercase enemy id (e.g. scorpion)" },
+    { "name": "rows", "type": "int", "required": true, "help": "Sprite sheet rows" },
+    { "name": "cols", "type": "int", "required": true, "help": "Sprite sheet columns" },
+    { "name": "fps",  "type": "int", "default": 12, "help": "Animation FPS" },
+    { "name": "loop", "default": "true", "choices": ["true", "false"], "help": "Loop the animation" },
+    { "name": "script-guid", "default": "", "help": "GUID of SpriteAnimationData.cs (auto-detect if empty)" },
+    { "name": "char-dir", "default": "Assets/Images/Characters", "help": "Character sprite root" },
+    { "name": "anim-dir", "default": "Assets/Animations/Enemies", "help": "Enemy SpriteAnimationData directory" },
+    { "name": "resources-db", "default": "Assets/Resources/ResourcesDB.asset" },
+    { "name": "catalog", "default": "Assets/Images/Characters/EnemyCatalog.md" }
+  ],
+  "steps": [
+    {
+      "type": "copy",
+      "source": "{source}",
+      "dest": "{unity_project}/{char_dir}/{Name}/{Name}.png"
+    },
+    { "type": "await-meta", "path": "{unity_project}/{char_dir}/{Name}/{Name}.png" },
+    {
+      "type": "run-script",
+      "script": "unity-sprite-slicer/scripts/sprite_slicer.py",
+      "args": ["slice", "{unity_project}/{char_dir}/{Name}/{Name}.png", "{rows}", "{cols}"]
+    },
+    {
+      "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{name}.asset",
+        "{unity_project}/{char_dir}/{Name}/{Name}.png",
+        "--name", "{name}",
+        "--fps", "{fps}",
+        "--loop",
+        "--unity-project", "{unity_project}"
+      ]
+    },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{name}.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{name}.asset", "guid_var": "anim_guid" },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "key: anim/{name}",
+      "insert": "\n    - key: anim/{name}\n      value: {fileID: 11400000, guid: {anim_guid}, type: 2}"
+    },
+    {
+      "type": "md-append",
+      "path": "{unity_project}/{catalog}",
+      "marker": "### {Name}",
+      "content": "### {Name}\n\n- Sheet: `{char_dir}/{Name}/{Name}.png` ({rows}x{cols} grid)\n- Anim: `{anim_dir}/{name}.asset` @ {fps} fps\n- Resource key: `anim/{name}`\n"
+    }
+  ]
+}
