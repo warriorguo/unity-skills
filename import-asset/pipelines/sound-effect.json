@@ -1,0 +1,34 @@
+{
+  "name": "sound-effect",
+  "description": "Import an SFX audio file: copy under Assets/Audio/SFX/ preserving the source extension (.wav/.ogg/.mp3), wait for Unity to generate .meta, register the clip in SoundConfig.asset with default volume/pitch, and append a row to the SFX catalog.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "Sound id (e.g. sfx_explosion). Used as soundId and filename stem." },
+    { "name": "volume", "type": "float", "default": 1.0, "help": "Default volume (0.0-1.0)" },
+    { "name": "pitch",  "type": "float", "default": 1.0, "help": "Default pitch multiplier" },
+    { "name": "audio-dir",    "default": "Assets/Audio/SFX", "help": "SFX directory" },
+    { "name": "sound-config", "default": "Assets/Resources/SoundConfig.asset", "help": "Path to SoundConfig.asset" },
+    { "name": "catalog",      "default": "Assets/Audio/SFXCatalog.md", "help": "Path to SFX catalog" }
+  ],
+  "steps": [
+    {
+      "type": "copy",
+      "source": "{source}",
+      "dest": "{unity_project}/{audio_dir}/{name}.{source_ext}"
+    },
+    { "type": "await-meta", "path": "{unity_project}/{audio_dir}/{name}.{source_ext}" },
+    { "type": "read-meta",  "path": "{unity_project}/{audio_dir}/{name}.{source_ext}", "guid_var": "audio_guid" },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{sound_config}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "soundId: {name}",
+      "insert": "\n    - soundId: {name}\n      clip: {fileID: 8300000, guid: {audio_guid}, type: 3}\n      volume: {volume}\n      pitch: {pitch}"
+    },
+    {
+      "type": "md-append",
+      "path": "{unity_project}/{catalog}",
+      "marker": "### {name}",
+      "content": "### {name}\n\n- File: `{audio_dir}/{name}.{source_ext}`\n- Defaults: volume={volume}, pitch={pitch}\n"
+    }
+  ]
+}

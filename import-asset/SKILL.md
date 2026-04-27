@@ -70,6 +70,7 @@ Templates use `{var}` for substitution from the argument context. Built-in
 variables:
 
 - `{source}` — absolute path to the source file
+- `{source_name}` / `{source_stem}` / `{source_ext}` — source filename, stem, and lowercase extension (without leading dot)
 - `{unity_project}` — absolute path to `--unity-project`
 - All declared `arguments` are exposed as `{name}`
 - `{Name}` and `{NAME}` — auto-derived PascalCase / UPPERCASE of `{name}` when

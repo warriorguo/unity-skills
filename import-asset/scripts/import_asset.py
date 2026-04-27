@@ -384,8 +384,12 @@ def main():
     parser = build_parser(pipeline)
     args = parser.parse_args()
 
+    src_path = Path(args.source).resolve()
     ctx = {
-        "source": str(Path(args.source).resolve()),
+        "source": str(src_path),
+        "source_name": src_path.name,
+        "source_stem": src_path.stem,
+        "source_ext": src_path.suffix.lstrip("."),
         "unity_project": str(Path(args.unity_project).resolve()),
         "_force": args.force,
     }
