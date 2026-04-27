@@ -1,0 +1,109 @@
+{
+  "name": "leg-track",
+  "description": "Import a track-type leg sprite (single 128x128 image, no animation): copy, write 1-frame Walk + Idle SpriteAnimationData .asset, register in ResourcesDB, write LegData with legType=track (which enables DecalEmitter), write ItemData, add to loot table, update PlayerAssembly.md.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "Lowercase id (e.g. heavytrack)" },
+    { "name": "size", "type": "int", "default": 128, "help": "Sprite size in px (default 128)" },
+    { "name": "rarity", "default": "common", "choices": ["common", "uncommon", "rare", "boss"], "help": "Drop rarity" },
+    { "name": "script-guid", "default": "", "help": "GUID of SpriteAnimationData.cs (auto-detect if empty)" },
+    { "name": "legs-dir", "default": "Assets/Images/Characters/Player/Legs" },
+    { "name": "anim-dir", "default": "Assets/Animations/Player/Legs" },
+    { "name": "resources-db", "default": "Assets/Resources/ResourcesDB.asset" },
+    { "name": "items-dir", "default": "GameData/items" },
+    { "name": "legs-data-dir", "default": "GameData/legs" },
+    { "name": "loot-dir", "default": "GameData/loot" },
+    { "name": "catalog", "default": "Assets/Images/Characters/Player/PlayerAssembly.md" }
+  ],
+  "steps": [
+    { "type": "set-var", "var": "loot_table",
+      "value": "'loot_boss' if '{rarity}' == 'boss' else ('loot_rare' if '{rarity}' == 'rare' else 'loot_common')",
+      "eval": true },
+    {
+      "type": "resize",
+      "source": "{source}",
+      "dest": "{unity_project}/{legs_dir}/{Name}.png",
+      "width": "{size}",
+      "height": "{size}"
+    },
+    { "type": "await-meta", "path": "{unity_project}/{legs_dir}/{Name}.png" },
+    {
+      "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{name}_walk.asset",
+        "{unity_project}/{legs_dir}/{Name}.png",
+        "--name", "{name}_walk",
+        "--fps", "1",
+        "--loop",
+        "--frames", "0",
+        "--unity-project", "{unity_project}"
+      ]
+    },
+    {
+      "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{name}_idle.asset",
+        "{unity_project}/{legs_dir}/{Name}.png",
+        "--name", "{name}_idle",
+        "--fps", "1",
+        "--loop",
+        "--frames", "0",
+        "--unity-project", "{unity_project}"
+      ]
+    },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{name}_walk.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{name}_walk.asset", "guid_var": "walk_guid" },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{name}_idle.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{name}_idle.asset", "guid_var": "idle_guid" },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "key: anim/{name}_walk",
+      "insert": "\n    - key: anim/{name}_walk\n      value: {fileID: 11400000, guid: {walk_guid}, type: 2}"
+    },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "key: anim/{name}_idle",
+      "insert": "\n    - key: anim/{name}_idle\n      value: {fileID: 11400000, guid: {idle_guid}, type: 2}"
+    },
+    {
+      "type": "write-json",
+      "path": "{unity_project}/{legs_data_dir}/{name}.json",
+      "merge": true,
+      "content": {
+        "id": "{name}",
+        "legType": "track",
+        "walkAnimKey": "anim/{name}_walk",
+        "idleAnimKey": "anim/{name}_idle"
+      }
+    },
+    {
+      "type": "write-json",
+      "path": "{unity_project}/{items_dir}/legs_{name}.json",
+      "merge": true,
+      "content": {
+        "id": "legs_{name}",
+        "type": "legs",
+        "refId": "{name}",
+        "rarity": "{rarity}"
+      }
+    },
+    {
+      "type": "json-list-append",
+      "path": "{unity_project}/{loot_dir}/{loot_table}.json",
+      "list": "drops",
+      "item": { "itemId": "legs_{name}", "weight": 1.0 },
+      "match_keys": ["itemId"]
+    },
+    {
+      "type": "md-append",
+      "path": "{unity_project}/{catalog}",
+      "marker": "### {Name} (track legs)",
+      "content": "### {Name} (track legs)\n\n- Sprite: `{legs_dir}/{Name}.png` ({size}x{size}, single)\n- Walk/Idle anim: `{anim_dir}/{name}_walk.asset`, `{anim_dir}/{name}_idle.asset` (1 frame each)\n- legType=track enables DecalEmitter on the player\n- Item: `legs_{name}` (rarity: {rarity}, loot: `{loot_table}`)\n"
+    }
+  ]
+}

@@ -131,10 +131,13 @@ def main():
         sys.exit(f"error: {meta} not found (run Unity to generate, then slice)")
 
     image_guid, sprites = read_image_meta(meta)
-    if not sprites:
-        sys.exit(f"error: no sprite entries in {meta} (slice the sheet first)")
 
-    if args.frames is not None:
+    if not sprites:
+        # Single-mode texture: reference the default sprite at fileID 21300000.
+        # Any --frames value is treated as 0 (the only sprite).
+        frame_count = len(args.frames) if args.frames else 1
+        ids = [21300000] * frame_count
+    elif args.frames is not None:
         try:
             ids = [sprites[i][1] for i in args.frames]
         except IndexError:
