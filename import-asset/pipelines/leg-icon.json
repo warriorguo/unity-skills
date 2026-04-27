@@ -1,0 +1,52 @@
+{
+  "name": "leg-icon",
+  "description": "Resize source image to a 64x64 inventory icon, copy under Assets/Images/Characters/Player/Legs/, register in ResourcesDB as item/{item}, set spriteKey on ItemData, and update the PlayerAssembly catalog.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "PascalCase asset basename (e.g. HeavyTrack)" },
+    { "name": "item", "required": true, "help": "ItemData id (e.g. legs_heavytrack)" },
+    { "name": "size", "type": "int", "default": 64, "help": "Icon size in px (default 64)" },
+    { "name": "legs-dir", "default": "Assets/Images/Characters/Player/Legs", "help": "Directory under unity-project for leg icons" },
+    { "name": "resources-db", "default": "Assets/Resources/ResourcesDB.asset", "help": "Path to ResourcesDB.asset under unity-project" },
+    { "name": "items-dir", "default": "GameData/items", "help": "Directory holding ItemData JSON files" },
+    { "name": "catalog", "default": "Assets/Images/Characters/Player/PlayerAssembly.md", "help": "Path to PlayerAssembly.md under unity-project" }
+  ],
+  "steps": [
+    {
+      "type": "resize",
+      "source": "{source}",
+      "dest": "{unity_project}/{legs_dir}/{name}Icon.png",
+      "width": "{size}",
+      "height": "{size}"
+    },
+    {
+      "type": "await-meta",
+      "path": "{unity_project}/{legs_dir}/{name}Icon.png"
+    },
+    {
+      "type": "read-meta",
+      "path": "{unity_project}/{legs_dir}/{name}Icon.png"
+    },
+    {
+      "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*entries:\\s*$",
+      "marker": "key: item/{item}",
+      "insert": "\n    - key: item/{item}\n      value: {fileID: 21300000, guid: {guid}, type: 3}"
+    },
+    {
+      "type": "write-json",
+      "path": "{unity_project}/{items_dir}/{item}.json",
+      "merge": true,
+      "content": {
+        "id": "{item}",
+        "spriteKey": "item/{item}"
+      }
+    },
+    {
+      "type": "md-append",
+      "path": "{unity_project}/{catalog}",
+      "marker": "### {Name} (icon)",
+      "content": "### {Name} (icon)\n\n- Asset: `{legs_dir}/{name}Icon.png` ({size}x{size})\n- Resource key: `item/{item}`\n- Item: `{item}`\n"
+    }
+  ]
+}

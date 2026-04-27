@@ -155,6 +155,28 @@ def step_await_meta(args: dict, ctx: dict, dry_run: bool):
     )
 
 
+_GUID_RE = re.compile(r"^guid:\s*([a-fA-F0-9]+)\s*$", re.MULTILINE)
+
+
+def step_read_meta(args: dict, ctx: dict, dry_run: bool):
+    """Extract values from a .meta file and bind them as template vars."""
+    target = Path(render(args["path"], ctx))
+    meta = Path(str(target) + ".meta")
+    bind_guid = args.get("guid_var", "guid")
+    print(f"[read-meta] {meta} -> {{{bind_guid}}}")
+    if dry_run:
+        ctx[bind_guid] = "deadbeefdeadbeefdeadbeefdeadbeef"
+        return
+    if not meta.exists():
+        raise PipelineError(f".meta not found: {meta}")
+    text = meta.read_text()
+    m = _GUID_RE.search(text)
+    if not m:
+        raise PipelineError(f"no `guid:` line in {meta}")
+    ctx[bind_guid] = m.group(1)
+    print(f"  {bind_guid} = {ctx[bind_guid]}")
+
+
 def step_write_json(args: dict, ctx: dict, dry_run: bool):
     path = Path(render(args["path"], ctx))
     content = render_obj(args["content"], ctx)
@@ -227,6 +249,7 @@ STEPS = {
     "copy": step_copy,
     "run-script": step_run_script,
     "await-meta": step_await_meta,
+    "read-meta": step_read_meta,
     "write-json": step_write_json,
     "text-insert": step_text_insert,
     "md-append": step_md_append,

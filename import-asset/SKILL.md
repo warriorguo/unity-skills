@@ -123,6 +123,18 @@ clear instruction to open Unity (which generates `.meta` files on import) and
 then re-run the same command. Earlier steps are skipped via idempotency, so
 the pipeline simply resumes at this point.
 
+### `read-meta`
+
+```json
+{ "type": "read-meta", "path": "<asset>", "guid_var": "guid" }
+```
+
+Reads `<asset>.meta` and binds the `guid:` value as a template variable
+(default name `{guid}`). Use this between `await-meta` and any step that
+needs the GUID — typically a `text-insert` that registers the asset in a
+project registry like ResourcesDB. Sets a stable placeholder GUID under
+`--dry-run` so downstream rendering works.
+
 ### `write-json`
 
 ```json
