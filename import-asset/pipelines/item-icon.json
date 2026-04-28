@@ -1,0 +1,40 @@
+{
+  "name": "item-icon",
+  "description": "Generic item icon importer (generalization of leg-icon). Resize source PNG to size x size, copy under {category-dir}/{name}Icon.png, register the sprite in ResourcesDB as item/{item}, set spriteKey on the matching ItemData JSON, and (optionally) append a catalog row. Works for any item category (legs, heads, weapons, misc) by parameterizing category-dir.",
+  "arguments": [
+    { "name": "item", "required": true, "help": "ItemData id (e.g. legs_heavytrack, head_visor)" },
+    { "name": "name", "required": true, "help": "PascalCase asset basename (e.g. HeavyTrack, Visor)" },
+    { "name": "category-dir", "required": true, "help": "Sprite folder under unity-project (e.g. Assets/Images/Characters/Player/Legs or Assets/Images/Items/Misc)" },
+    { "name": "size", "type": "int", "default": 64, "help": "Icon size in px" },
+    { "name": "items-data-dir", "default": "Assets/StreamingAssets/GameData/items", "help": "Directory holding ItemData JSON files" },
+    { "name": "resources-db", "default": "Assets/Prefabs/System/ResourcesDB.asset" },
+    { "name": "catalog", "default": "", "help": "Optional markdown catalog to append a row to" }
+  ],
+  "steps": [
+    { "type": "resize",
+      "source": "{source}",
+      "dest": "{unity_project}/{category_dir}/{name}Icon.png",
+      "width": "{size}", "height": "{size}" },
+    { "type": "await-meta", "path": "{unity_project}/{category_dir}/{name}Icon.png" },
+    { "type": "read-meta",  "path": "{unity_project}/{category_dir}/{name}Icon.png", "guid_var": "icon_guid" },
+    { "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*_entries:\\s*$",
+      "marker": "key: item/{item}\n",
+      "insert": "\n  - key: item/{item}\n    asset: {fileID: 21300000, guid: {icon_guid}, type: 3}" },
+    { "type": "write-json",
+      "path": "{unity_project}/{items_data_dir}/{item}.json",
+      "merge": true,
+      "content": {
+        "dataType": "ItemData",
+        "id": "{item}",
+        "spriteKey": "item/{item}"
+      }
+    },
+    { "type": "md-append",
+      "when": "'{catalog}' != ''",
+      "path": "{unity_project}/{catalog}",
+      "marker": "### {name} (icon)",
+      "content": "### {name} (icon)\n\n- Asset: `{category_dir}/{name}Icon.png` ({size}x{size})\n- Resource key: `item/{item}`\n" }
+  ]
+}

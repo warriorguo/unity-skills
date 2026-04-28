@@ -37,6 +37,7 @@ def load_pipeline(name: str) -> dict:
 
 
 _VAR_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_PURE_VAR_RE = re.compile(r"^\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
 def render(template, ctx: dict):
@@ -54,6 +55,11 @@ def render(template, ctx: dict):
 
 def render_obj(obj, ctx: dict):
     if isinstance(obj, str):
+        # Pure placeholder like "{count}" returns the raw context value so
+        # int/float/bool vars survive JSON serialization with their types.
+        m = _PURE_VAR_RE.match(obj)
+        if m and m.group(1) in ctx:
+            return ctx[m.group(1)]
         return render(obj, ctx)
     if isinstance(obj, list):
         return [render_obj(x, ctx) for x in obj]

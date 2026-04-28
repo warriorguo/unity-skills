@@ -1,0 +1,102 @@
+{
+  "name": "head-sprite",
+  "description": "Import a player head sprite sheet end-to-end (modeled on leg-walk for heads). Resize, copy, slice rows x cols, generate Walk + Idle SpriteAnimationData .asset files, register anim/{id}_walk and anim/{id}_idle in ResourcesDB, write HeadData and ItemData JSON, and append to the rarity-driven loot table.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "PascalCase asset basename (e.g. Visor)" },
+    { "name": "id", "required": true, "help": "snake_case head id (e.g. head_visor); used as ResourcesDB anim key prefix and HeadData id" },
+    { "name": "rows", "type": "int", "required": true, "help": "Sprite sheet rows" },
+    { "name": "cols", "type": "int", "required": true, "help": "Sprite sheet columns" },
+    { "name": "fps", "type": "int", "default": 12, "help": "Walk FPS" },
+    { "name": "cell-size", "type": "int", "default": 64, "help": "Per-cell px after resize" },
+    { "name": "rarity", "default": "common", "choices": ["common", "uncommon", "rare", "epic"], "help": "Drop rarity (drives loot table selection)" },
+    { "name": "max-weapon-slots", "type": "int", "default": 2, "help": "HeadData maxWeaponSlots field" },
+    { "name": "script-guid", "default": "", "help": "GUID of SpriteAnimationData.cs (auto-detect if empty)" },
+    { "name": "heads-img-dir", "default": "Assets/Images/Characters/Player/Heads" },
+    { "name": "anim-dir", "default": "Assets/Prefabs/Characters/Player/Heads" },
+    { "name": "heads-data-dir", "default": "Assets/StreamingAssets/GameData/heads" },
+    { "name": "items-data-dir", "default": "Assets/StreamingAssets/GameData/items" },
+    { "name": "loot-dir", "default": "Assets/StreamingAssets/GameData/loot_tables" },
+    { "name": "resources-db", "default": "Assets/Prefabs/System/ResourcesDB.asset" }
+  ],
+  "steps": [
+    { "type": "set-var", "var": "width",  "value": "{cols} * {cell_size}", "eval": true },
+    { "type": "set-var", "var": "height", "value": "{rows} * {cell_size}", "eval": true },
+    { "type": "set-var", "var": "loot_table",
+      "value": "'boss_loot' if '{rarity}' == 'epic' else ('rare_enemy' if '{rarity}' == 'rare' else 'common_enemy')",
+      "eval": true },
+    { "type": "resize",
+      "source": "{source}",
+      "dest": "{unity_project}/{heads_img_dir}/{name}.png",
+      "width": "{width}", "height": "{height}" },
+    { "type": "await-meta", "path": "{unity_project}/{heads_img_dir}/{name}.png" },
+    { "type": "run-script",
+      "script": "unity-sprite-slicer/scripts/sprite_slicer.py",
+      "args": ["slice", "{unity_project}/{heads_img_dir}/{name}.png", "{rows}", "{cols}"] },
+    { "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{id}_walk.asset",
+        "{unity_project}/{heads_img_dir}/{name}.png",
+        "--name", "{id}_walk",
+        "--fps", "{fps}",
+        "--loop",
+        "--unity-project", "{unity_project}"
+      ] },
+    { "type": "run-script",
+      "script": "import-asset/scripts/write_sprite_anim_data.py",
+      "args": [
+        "{unity_project}/{anim_dir}/{id}_idle.asset",
+        "{unity_project}/{heads_img_dir}/{name}.png",
+        "--name", "{id}_idle",
+        "--fps", "1",
+        "--loop",
+        "--frames", "0",
+        "--unity-project", "{unity_project}"
+      ] },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{id}_walk.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{id}_walk.asset", "guid_var": "walk_guid" },
+    { "type": "await-meta", "path": "{unity_project}/{anim_dir}/{id}_idle.asset" },
+    { "type": "read-meta",  "path": "{unity_project}/{anim_dir}/{id}_idle.asset", "guid_var": "idle_guid" },
+    { "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*_entries:\\s*$",
+      "marker": "key: anim/{id}_walk\n",
+      "insert": "\n  - key: anim/{id}_walk\n    asset: {fileID: 11400000, guid: {walk_guid}, type: 2}" },
+    { "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*_entries:\\s*$",
+      "marker": "key: anim/{id}_idle\n",
+      "insert": "\n  - key: anim/{id}_idle\n    asset: {fileID: 11400000, guid: {idle_guid}, type: 2}" },
+    { "type": "write-json",
+      "path": "{unity_project}/{heads_data_dir}/{id}.json",
+      "merge": true,
+      "content": {
+        "dataType": "HeadData",
+        "id": "{id}",
+        "maxWeaponSlots": "{max_weapon_slots}"
+      }
+    },
+    { "type": "write-json",
+      "path": "{unity_project}/{items_data_dir}/{id}.json",
+      "merge": true,
+      "content": {
+        "dataType": "ItemData",
+        "id": "{id}",
+        "type": "head",
+        "rarity": "{rarity}"
+      }
+    },
+    { "type": "json-list-append",
+      "path": "{unity_project}/{loot_dir}/{loot_table}.json",
+      "list": "entries",
+      "item": {
+        "itemId": "{id}",
+        "weight": 10,
+        "minCount": 1,
+        "maxCount": 1,
+        "conditions": ""
+      },
+      "match_keys": ["itemId"]
+    }
+  ]
+}
