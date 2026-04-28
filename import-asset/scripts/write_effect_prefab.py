@@ -22,6 +22,14 @@ from pathlib import Path
 
 
 def read_image_meta(meta_path: Path):
+    """Return (image_guid, [(name, internal_id)]) deduped by name.
+
+    Some Unity-imported sheets list each sprite twice in spriteSheet.sprites:
+    once with the slicer-assigned canonical 213xxxxx internalID, then again
+    with a Unity-generated random bignum. Both refer to the same sub-sprite.
+    Keeping the first occurrence per name yields the canonical IDs and
+    eliminates the duplicate-frames bug downstream.
+    """
     text = meta_path.read_text()
     g = re.search(r"^guid:\s*([a-fA-F0-9]+)", text, re.MULTILINE)
     if not g:
@@ -29,6 +37,7 @@ def read_image_meta(meta_path: Path):
     image_guid = g.group(1)
 
     sprites = []
+    seen = set()
     in_sheet = False
     sheet_indent = None
     cur_name = None
@@ -48,7 +57,9 @@ def read_image_meta(meta_path: Path):
             cur_name = nm.group(1).strip()
         idm = re.match(r"\s+internalID:\s*(-?\d+)", line)
         if idm and cur_name is not None:
-            sprites.append((cur_name, int(idm.group(1))))
+            if cur_name not in seen:
+                sprites.append((cur_name, int(idm.group(1))))
+                seen.add(cur_name)
             cur_name = None
     return image_guid, sprites
 

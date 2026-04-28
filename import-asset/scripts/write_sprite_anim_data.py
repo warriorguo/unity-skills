@@ -22,7 +22,10 @@ from pathlib import Path
 
 
 def read_image_meta(meta_path: Path):
-    """Return (image_guid, [(name, internal_id)]) from a sliced sprite-sheet .meta."""
+    """Return (image_guid, [(name, internal_id)]) from a sliced sprite-sheet .meta,
+    deduped by sprite name. Unity-imported sheets sometimes list each sprite
+    twice in spriteSheet.sprites (once canonical 213xxxxx, once bignum); the
+    first occurrence wins, which keeps the canonical IDs."""
     text = meta_path.read_text()
     g = re.search(r"^guid:\s*([a-fA-F0-9]+)", text, re.MULTILINE)
     if not g:
@@ -30,6 +33,7 @@ def read_image_meta(meta_path: Path):
     image_guid = g.group(1)
 
     sprites = []
+    seen = set()
     in_sheet = False
     sheet_indent = None
     cur_name = None
@@ -47,9 +51,11 @@ def read_image_meta(meta_path: Path):
         nm = re.match(r"\s+name:\s*(.+)$", line)
         if nm:
             cur_name = nm.group(1).strip()
-        idm = re.match(r"\s+internalID:\s*(\d+)", line)
+        idm = re.match(r"\s+internalID:\s*(-?\d+)", line)
         if idm and cur_name is not None:
-            sprites.append((cur_name, int(idm.group(1))))
+            if cur_name not in seen:
+                sprites.append((cur_name, int(idm.group(1))))
+                seen.add(cur_name)
             cur_name = None
     return image_guid, sprites
 
