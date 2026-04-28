@@ -1,0 +1,40 @@
+{
+  "name": "skill-sprite",
+  "description": "Register a skill sprite under skill/{id}@{slot}. Two modes: (1) external source PNG — copy (and optionally resize) into Assets/Images/Skills/, then register. (2) in-project sprite sheet — no copy, look up the named sub-sprite's internalID and register that. Auto-detects via whether <source> sits under {unity_project}/Assets/.",
+  "arguments": [
+    { "name": "id", "required": true, "help": "Skill id (e.g. ice_shield)" },
+    { "name": "slot", "required": true, "choices": ["icon", "ground", "projectile"], "help": "ResourcesDB key suffix" },
+    { "name": "subsprite", "default": "", "help": "Sub-sprite name when source is a sliced sheet (else whole-image fileID 21300000)" },
+    { "name": "size", "type": "int", "default": 0, "help": "If >0, resize external source to size x size (typical for icon)" },
+    { "name": "skills-img-dir", "default": "Assets/Images/Skills" },
+    { "name": "resources-db", "default": "Assets/Prefabs/System/ResourcesDB.asset" }
+  ],
+  "steps": [
+    { "type": "set-var", "var": "is_external",
+      "value": "not '{source}'.startswith('{unity_project}/')",
+      "eval": true },
+    { "type": "set-var", "var": "target_path",
+      "value": "'{unity_project}/{skills_img_dir}/{source_name}' if {is_external} else '{source}'",
+      "eval": true },
+    { "type": "resize",
+      "when": "{is_external} and {size} > 0",
+      "source": "{source}", "dest": "{target_path}",
+      "width": "{size}", "height": "{size}" },
+    { "type": "copy",
+      "when": "{is_external} and {size} == 0",
+      "source": "{source}", "dest": "{target_path}" },
+    { "type": "await-meta", "path": "{target_path}" },
+    { "type": "read-meta", "path": "{target_path}", "guid_var": "png_guid" },
+    { "type": "set-var", "var": "sprite_fileid", "value": "21300000",
+      "when": "'{subsprite}' == ''" },
+    { "type": "read-subsprite-id",
+      "when": "'{subsprite}' != ''",
+      "path": "{target_path}", "sprite_name": "{subsprite}", "var": "sprite_fileid" },
+    { "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*_entries:\\s*$",
+      "marker": "key: skill/{id}@{slot}\n",
+      "insert": "\n  - key: skill/{id}@{slot}\n    asset: {fileID: {sprite_fileid}, guid: {png_guid}, type: 3}"
+    }
+  ]
+}

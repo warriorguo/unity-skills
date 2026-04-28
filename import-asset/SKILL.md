@@ -125,6 +125,16 @@ clear instruction to open Unity (which generates `.meta` files on import) and
 then re-run the same command. Earlier steps are skipped via idempotency, so
 the pipeline simply resumes at this point.
 
+### `read-subsprite-id`
+
+```json
+{ "type": "read-subsprite-id", "path": "<png>", "sprite_name": "GroundEffects1_4", "var": "sprite_fileid" }
+```
+
+Reads `<png>.meta`, finds the sliced sub-sprite whose `name:` matches
+`sprite_name`, and binds its `internalID` (used as a fileID in registry
+refs) as a context variable. Errors if the named sub-sprite isn't found.
+
 ### `read-meta`
 
 ```json
@@ -197,6 +207,22 @@ created if missing. `list` is a dot-path to the target array.
 ```
 
 Appends a section to a markdown doc if the marker isn't already present.
+
+## Conditional steps
+
+Any step can carry a `"when": "<expr>"` field. The expression is rendered
+against the current context (so it can reference `{var}` substitutions) and
+then evaluated as a restricted Python expression. If it evaluates to a
+falsy value, the step is skipped.
+
+```json
+{ "type": "copy", "when": "{is_external} == True",
+  "source": "{source}", "dest": "{target_path}" }
+```
+
+`when` is useful when a single pipeline supports both an "external source"
+and an "in-project source" mode and only one of two parallel steps should
+fire.
 
 ## Idempotency model
 

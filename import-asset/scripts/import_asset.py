@@ -158,6 +158,49 @@ def step_await_meta(args: dict, ctx: dict, dry_run: bool):
 _GUID_RE = re.compile(r"^guid:\s*([a-fA-F0-9]+)\s*$", re.MULTILINE)
 
 
+def step_read_subsprite_id(args: dict, ctx: dict, dry_run: bool):
+    """Look up a sub-sprite's internalID by name from a sliced sheet's .meta
+    and bind it as a context variable (for use as a fileID in registry refs).
+    """
+    target = Path(render(args["path"], ctx))
+    meta = Path(str(target) + ".meta")
+    sprite_name = render(args["sprite_name"], ctx)
+    var = args.get("var", "sprite_fileid")
+    print(f"[read-subsprite-id] {meta}#{sprite_name} -> {{{var}}}")
+    if dry_run:
+        ctx[var] = "0"
+        return
+    if not meta.exists():
+        raise PipelineError(f".meta not found: {meta}")
+    text = meta.read_text()
+    in_sheet = False
+    sheet_indent = None
+    cur_name = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if re.match(r"\s+spriteSheet:\s*$", line):
+            in_sheet = True
+            sheet_indent = indent
+            continue
+        if in_sheet and stripped and indent <= sheet_indent:
+            in_sheet = False
+        if not in_sheet:
+            continue
+        nm = re.match(r"\s+name:\s*(.+)$", line)
+        if nm:
+            cur_name = nm.group(1).strip()
+            continue
+        idm = re.match(r"\s+internalID:\s*(-?\d+)", line)
+        if idm and cur_name == sprite_name:
+            ctx[var] = idm.group(1)
+            print(f"  {var} = {ctx[var]}")
+            return
+        if idm:
+            cur_name = None
+    raise PipelineError(f"sub-sprite '{sprite_name}' not found in {meta}")
+
+
 def step_read_meta(args: dict, ctx: dict, dry_run: bool):
     """Extract values from a .meta file and bind them as template vars."""
     target = Path(render(args["path"], ctx))
@@ -308,6 +351,7 @@ STEPS = {
     "run-script": step_run_script,
     "await-meta": step_await_meta,
     "read-meta": step_read_meta,
+    "read-subsprite-id": step_read_subsprite_id,
     "write-json": step_write_json,
     "text-insert": step_text_insert,
     "md-append": step_md_append,
@@ -413,6 +457,16 @@ def main():
         fn = STEPS.get(kind)
         if not fn:
             raise PipelineError(f"step {i}: unknown step type {kind!r}")
+        when = step.get("when")
+        if when is not None:
+            cond = render(when, ctx) if isinstance(when, str) else when
+            try:
+                cond_val = bool(eval(cond, {"__builtins__": {}}, {})) if isinstance(cond, str) else bool(cond)
+            except Exception as e:
+                raise PipelineError(f"step {i} 'when' eval failed for {cond!r}: {e}")
+            if not cond_val:
+                print(f"\n--- step {i}/{len(steps)}: {kind} (skipped: when={when!r}) ---")
+                continue
         print(f"\n--- step {i}/{len(steps)}: {kind} ---")
         fn(step, ctx, args.dry_run)
 
