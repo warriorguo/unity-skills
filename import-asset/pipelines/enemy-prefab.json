@@ -1,0 +1,45 @@
+{
+  "name": "enemy-prefab",
+  "description": "Clone a reference enemy prefab and wire it up end-to-end: copy → rename root → fix Rigidbody2D constraints → embed the BloodBar nested prefab + EnemyView wiring → write the matching CharacterAnimConfig .asset → register anim/{id} in ResourcesDB. <source> is a reference prefab path inside the Unity project. Skeleton CharacterAnimConfig has empty spriteAnimStates; populate manually or via follow-up steps.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "PascalName of the new enemy (used for prefab and asset filenames + root GO m_Name)" },
+    { "name": "id", "required": true, "help": "snake_case enemy id (used for ResourcesDB key anim/{id})" },
+    { "name": "folder", "required": true, "help": "Subfolder under chars-prefab-dir (e.g. Bugs)" },
+    { "name": "bloodbar-y", "type": "float", "default": 0.38, "help": "BloodBar local Y offset" },
+    { "name": "bloodbar-scale", "type": "float", "default": 1.0, "help": "BloodBar local X scale (1.0 = unmodified from source)" },
+    { "name": "chars-prefab-dir", "default": "Assets/Prefabs/Characters" },
+    { "name": "resources-db", "default": "Assets/Prefabs/System/ResourcesDB.asset" }
+  ],
+  "steps": [
+    { "type": "copy",
+      "source": "{source}",
+      "dest": "{unity_project}/{chars_prefab_dir}/{folder}/{name}.prefab" },
+    { "type": "await-meta", "path": "{unity_project}/{chars_prefab_dir}/{folder}/{name}.prefab" },
+    { "type": "read-meta", "path": "{unity_project}/{chars_prefab_dir}/{folder}/{name}.prefab", "guid_var": "prefab_guid" },
+    { "type": "run-script",
+      "script": "import-asset/scripts/prefab_setup_enemy.py",
+      "args": [
+        "{unity_project}/{chars_prefab_dir}/{folder}/{name}.prefab",
+        "--new-name", "{name}",
+        "--bloodbar-y", "{bloodbar_y}",
+        "--bloodbar-scale", "{bloodbar_scale}"
+      ]
+    },
+    { "type": "run-script",
+      "script": "import-asset/scripts/gen_character_anim_config.py",
+      "args": [
+        "{unity_project}/{chars_prefab_dir}/{folder}/{name}.asset",
+        "--prefab", "{unity_project}/{chars_prefab_dir}/{folder}/{name}.prefab",
+        "--name", "{name}"
+      ]
+    },
+    { "type": "await-meta", "path": "{unity_project}/{chars_prefab_dir}/{folder}/{name}.asset" },
+    { "type": "read-meta", "path": "{unity_project}/{chars_prefab_dir}/{folder}/{name}.asset", "guid_var": "anim_config_guid" },
+    { "type": "text-insert",
+      "path": "{unity_project}/{resources_db}",
+      "anchor": "(?m)^\\s*_entries:\\s*$",
+      "marker": "key: anim/{id}\n",
+      "insert": "\n  - key: anim/{id}\n    asset: {fileID: 11400000, guid: {anim_config_guid}, type: 2}"
+    }
+  ]
+}
