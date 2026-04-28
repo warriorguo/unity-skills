@@ -13,6 +13,9 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -66,6 +69,76 @@ def render_obj(obj, ctx: dict):
     if isinstance(obj, dict):
         return {k: render_obj(v, ctx) for k, v in obj.items()}
     return obj
+
+
+_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+
+
+def _resolve_source(src: str, force: bool, dry_run: bool) -> str:
+    """Transparently download an http(s) URL into a per-URL cache directory and
+    return the cached local absolute path. Pass-through for non-URL inputs.
+
+    Cache layout:  ~/.cache/import-asset/<sha256(url)[:16]>/<basename>
+    """
+    if not _URL_RE.match(src):
+        return src
+
+    cache_root = (
+        Path.home() / ".cache" / "import-asset"
+        / hashlib.sha256(src.encode()).hexdigest()[:16]
+    )
+
+    parsed = urllib.parse.urlparse(src)
+    url_path = parsed.path or ""
+    fname = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
+    if not fname:
+        print(f"  warning: could not derive filename from URL, using 'download.bin'",
+              file=sys.stderr)
+        fname = "download.bin"
+    cached = cache_root / fname
+
+    if dry_run:
+        print(f"[download] {src} -> {cached} (dry-run, skipped)")
+        return str(cached)
+
+    if force and cache_root.exists():
+        shutil.rmtree(cache_root)
+
+    if cached.exists():
+        print(f"[download] {src} (cache hit: {cached})")
+        return str(cached)
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+    print(f"[download] {src} -> {cached}")
+
+    req = urllib.request.Request(src, headers={"User-Agent": "import-asset/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            status = getattr(resp, "status", 200)
+            if not (200 <= status < 300):
+                raise PipelineError(f"download {src!r}: HTTP {status}")
+            # Honor Content-Disposition: filename=...
+            cd = resp.headers.get("Content-Disposition", "") or ""
+            cd_match = re.search(r'filename\*?=(?:UTF-8\'\')?\"?([^\";]+)\"?', cd)
+            if cd_match:
+                cd_name = urllib.parse.unquote(cd_match.group(1).strip())
+                if cd_name and cd_name != fname:
+                    cached = cache_root / cd_name
+                    fname = cd_name
+                    print(f"  filename from Content-Disposition: {fname}")
+            data = resp.read()
+            if not data:
+                raise PipelineError(f"empty body for {src!r}")
+            cached.write_bytes(data)
+    except urllib.error.HTTPError as e:
+        raise PipelineError(f"download {src!r}: HTTP {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        raise PipelineError(f"download {src!r}: {e.reason}")
+    except Exception as e:
+        raise PipelineError(f"download {src!r}: {e}")
+
+    print(f"  downloaded {len(data)} bytes")
+    return str(cached)
 
 
 def _md5(p: Path) -> str:
@@ -434,7 +507,8 @@ def main():
     parser = build_parser(pipeline)
     args = parser.parse_args()
 
-    src_path = Path(args.source).resolve()
+    resolved_src = _resolve_source(args.source, args.force, args.dry_run)
+    src_path = Path(resolved_src) if args.dry_run else Path(resolved_src).resolve()
     ctx = {
         "source": str(src_path),
         "source_name": src_path.name,

@@ -20,7 +20,7 @@ Common arguments (handled by dispatcher):
 
 | Flag | Description |
 |------|-------------|
-| `<source>` | Path to the raw asset (image, audio, etc.) being imported. |
+| `<source>` | Path to the raw asset (image, audio, etc.) being imported. An `http://` or `https://` URL is also accepted — the dispatcher transparently downloads it to `~/.cache/import-asset/<sha256(url)[:16]>/<basename>` and proceeds as if a local path had been given. |
 | `--as <type>` | Pipeline name; must match a file under `pipelines/<type>.json`. |
 | `--unity-project <path>` | Unity project root. Defaults to `$UNITY_PROJECT` or the cwd. |
 | `--dry-run` | Print every planned step without writing anything. |
