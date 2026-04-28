@@ -1,0 +1,37 @@
+{
+  "name": "projectile-sprite",
+  "description": "Import a single-sprite projectile end-to-end: copy PNG into Assets/Images/Weapons/{Category}/, await Unity import, and inject a new inactive child (GameObject + Transform + SpriteRenderer) into the projectile container prefab. Idempotent on child name.",
+  "arguments": [
+    { "name": "name", "required": true, "help": "Projectile child id (matches the in-prefab GameObject name, e.g. proj_missile_blue)" },
+    { "name": "category", "required": true, "help": "Sprite folder under Assets/Images/Weapons (e.g. Missle, Bullets)" },
+    { "name": "collision", "required": true, "choices": ["player", "enemy"], "help": "player: enemy fires at player; enemy: player fires at enemies" },
+    { "name": "ppu", "type": "int", "default": 100, "help": "Pixels per unit for m_Size" },
+    { "name": "layer", "type": "int", "default": 6, "help": "GameObject m_Layer (matches existing children)" },
+    { "name": "sorting-layer", "type": "int", "default": 5 },
+    { "name": "sorting-order", "type": "int", "default": 5 },
+    { "name": "weapons-img-dir", "default": "Assets/Images/Weapons" },
+    { "name": "player-projectile-prefab", "default": "Assets/Prefabs/Weapons/Projectiles/Projectile.prefab", "help": "Container prefab for player-fired projectiles" },
+    { "name": "enemy-projectile-prefab", "default": "Assets/Prefabs/Weapons/Projectiles/Projectile.prefab", "help": "Container prefab for enemy-fired projectiles" }
+  ],
+  "steps": [
+    { "type": "set-var", "var": "target_prefab",
+      "value": "'{enemy_projectile_prefab}' if '{collision}' == 'player' else '{player_projectile_prefab}'",
+      "eval": true },
+    { "type": "copy",
+      "source": "{source}",
+      "dest": "{unity_project}/{weapons_img_dir}/{category}/{source_stem}.png" },
+    { "type": "await-meta", "path": "{unity_project}/{weapons_img_dir}/{category}/{source_stem}.png" },
+    { "type": "run-script",
+      "script": "import-asset/scripts/add_projectile_child.py",
+      "args": [
+        "{unity_project}/{target_prefab}",
+        "--name", "{name}",
+        "--png", "{unity_project}/{weapons_img_dir}/{category}/{source_stem}.png",
+        "--ppu", "{ppu}",
+        "--layer", "{layer}",
+        "--sorting-layer", "{sorting_layer}",
+        "--sorting-order", "{sorting_order}"
+      ]
+    }
+  ]
+}
