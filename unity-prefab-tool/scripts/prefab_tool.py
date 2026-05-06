@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Unity Prefab Reader - Parse, browse, and modify Unity 2022 prefab files.
+"""Unity Prefab Tool - Parse, browse, and modify Unity 2022 prefab files.
 
 Supports tree browsing, object inspection, component listing,
-searching, summary statistics, and write operations (modify properties,
-rename, set-active, set-transform, add-child, remove) for Unity
-YAML-serialized prefabs.
+searching, summary statistics, write operations (modify properties,
+rename, set-active, set-transform, add-child, remove), and Unity-legal
+ID generation (GUIDs and fileIDs) for Unity YAML-serialized prefabs.
 """
 
 import argparse
@@ -430,12 +430,27 @@ def serialize_unity_doc(class_id, file_id, type_name, fields):
     return "\n".join(lines) + "\n"
 
 
+_INT64_MIN = -(2 ** 63)
+_INT64_MAX = (2 ** 63) - 1
+
+
 def generate_file_id(existing_ids):
-    """Generate a new unique fileID not in existing_ids."""
+    """Generate a new unique fileID not in existing_ids.
+
+    fileIDs are signed 64-bit integers (Unity's internal type). We avoid 0
+    (reserved for null references) and pick from a high positive band so new
+    IDs do not collide with the small, sequential IDs (e.g. 100000, 400000,
+    11400000) that Unity itself emits.
+    """
     while True:
-        new_id = random.randint(1000000, 99999999)
-        if new_id not in existing_ids:
+        new_id = random.randint(10 ** 14, _INT64_MAX)
+        if new_id != 0 and new_id not in existing_ids:
             return new_id
+
+
+def generate_guid():
+    """Generate a Unity-legal asset GUID (32-char lowercase hex)."""
+    return "%032x" % random.getrandbits(128)
 
 
 # ---------------------------------------------------------------------------
@@ -1195,12 +1210,32 @@ def cmd_remove(args):
 
 
 # ---------------------------------------------------------------------------
+# ID generation subcommands
+# ---------------------------------------------------------------------------
+
+def cmd_new_guid(args):
+    for _ in range(max(1, args.count)):
+        print(generate_guid())
+
+
+def cmd_new_file_id(args):
+    existing = set()
+    if args.prefab:
+        _, doc_ranges = parse_prefab_raw(args.prefab)
+        existing = set(dr["file_id"] for dr in doc_ranges)
+    for _ in range(max(1, args.count)):
+        new_id = generate_file_id(existing)
+        existing.add(new_id)
+        print(new_id)
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="prefab_reader",
+        prog="prefab_tool",
         description="Read, browse, and modify Unity 2022 prefab files.",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -1279,6 +1314,17 @@ def main():
     p_remove.add_argument("prefab_path", help="Path to the .prefab file")
     p_remove.add_argument("go_file_id", help="The fileID of the GameObject to remove")
     p_remove.set_defaults(func=cmd_remove)
+
+    # new-guid
+    p_new_guid = subparsers.add_parser("new-guid", help="Generate Unity-legal asset GUID(s)")
+    p_new_guid.add_argument("--count", type=int, default=1, help="Number of GUIDs to emit")
+    p_new_guid.set_defaults(func=cmd_new_guid)
+
+    # new-fileid
+    p_new_fid = subparsers.add_parser("new-fileid", help="Generate unique Unity-legal fileID(s)")
+    p_new_fid.add_argument("--prefab", default=None, help="Avoid colliding with IDs in this prefab file")
+    p_new_fid.add_argument("--count", type=int, default=1, help="Number of fileIDs to emit")
+    p_new_fid.set_defaults(func=cmd_new_file_id)
 
     args = parser.parse_args()
     if not args.command:
