@@ -1,6 +1,6 @@
 ---
 name: image-processor
-description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF), remove a specific color from an image (make it transparent), adjust image opacity/transparency, rotate or flip images, or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", "make it semi-transparent", "rotate this image 90 degrees", "flip the image", or "add a background to this sprite".
+description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF — including JPG↔PNG with EXIF-orientation correction and alpha flattening), remove a specific color from an image (make it transparent), adjust image opacity/transparency, rotate or flip images, or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "convert this jpg to png", "save as webp", "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", "make it semi-transparent", "rotate this image 90 degrees", "flip the image", or "add a background to this sprite".
 ---
 
 # Image Processor
@@ -112,6 +112,52 @@ done
 ```
 
 Make sure the output directory exists first (`mkdir -p resized`).
+
+## Convert Format
+
+Use `scripts/convert.py` to convert an image between formats (e.g. JPG → PNG, PNG → WEBP, PNG → JPG). Handles transparency and EXIF orientation correctly so the output is always upright and visually equivalent to the input.
+
+### Usage
+
+```bash
+python <skill-path>/scripts/convert.py <input> <output> [options]
+python <skill-path>/scripts/convert.py <input> --to <format> [options]
+```
+
+When `<output>` is omitted, the script writes next to the input using the target format's default extension (requires `--to`).
+
+### Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--to FMT` | Target format. Overrides extension. One of: `jpg`/`jpeg`, `png`, `webp`, `bmp`, `tiff`, `gif` | `--to png` |
+| `--bg-color C` | Flatten background when target format has no alpha (e.g. JPEG). `R,G,B` or `R,G,B,A`, default `255,255,255` (white) | `--bg-color '0,0,0'` |
+| `--quality Q` | JPEG/WEBP quality 1-100 (default: 95) | `--quality 85` |
+| `--no-auto-orient` | Do NOT apply EXIF Orientation on input | `--no-auto-orient` |
+| `--keep-exif` | Preserve EXIF metadata in the output (Orientation reset to 1 since pixels are already rotated) | `--keep-exif` |
+
+### Behavior
+
+- **Transparency**: preserved when the target format supports alpha (`png`, `webp`, `gif`, `tiff`). When the target is non-alpha (`jpg`, `bmp`), transparent pixels are flattened over `--bg-color`.
+- **EXIF orientation**: applied on input by default, so a phone photo tagged with rotation comes out upright. Pass `--no-auto-orient` to suppress.
+- **EXIF metadata**: stripped by default (most consumers don't need it after format conversion). Use `--keep-exif` to retain it.
+
+### Examples
+
+Convert a phone photo to PNG (handles EXIF rotation automatically):
+```bash
+python <skill-path>/scripts/convert.py photo.jpg photo.png
+```
+
+Convert PNG with transparency to JPG with a black background:
+```bash
+python <skill-path>/scripts/convert.py icon.png icon.jpg --bg-color '0,0,0'
+```
+
+Convert to WEBP at lower quality, keeping the input filename:
+```bash
+python <skill-path>/scripts/convert.py photo.jpg --to webp --quality 80
+```
 
 ## Remove Color
 
