@@ -11,20 +11,27 @@ editing prefab YAML, and end-to-end importing of new assets.
 |-------|--------------|
 | [`image-processor`](image-processor/SKILL.md) | Resize, info, EXIF, color removal, opacity, rotate/flip, and Unity-aware per-tile background compositing using PIL/Pillow. |
 | [`unity-sprite-slicer`](unity-sprite-slicer/SKILL.md) | Slice a sprite texture into a `rows × cols` grid by editing the `.meta` file (Grid by Cell Count). |
-| [`unity-animation-editor`](unity-animation-editor/SKILL.md) | Create and modify `.anim` and `.controller` files — sprite flipbook clips and AnimatorControllers. |
+| [`unity-animation-editor`](unity-animation-editor/SKILL.md) | Create and modify `SpriteAnimationData` ScriptableObject `.asset` files for the project's custom `SpriteAnimation` system. |
 | [`unity-prefab-tool`](unity-prefab-tool/SKILL.md) | Browse, query, and modify Unity prefab YAML — tree view, component inspection, property edits, transform/active/child operations, and Unity-legal GUID/fileID generation. |
 | [`import-asset`](import-asset/SKILL.md) | One-shot importer with config-driven, idempotent pipelines. Ships pipelines for `leg-icon`, `leg-walk`, `leg-track`, `enemy-sprite`, `sound-effect`, and `effect-sprite`. |
 
 ## Installation
 
-Symlink the whole repo or individual skills into your Claude skills directory:
+Claude Code discovers skills as direct entries under `~/.claude/skills/`, so symlink each skill individually rather than the whole repo. From a clone of this repo:
 
 ```bash
-# All skills
-ln -s "$(pwd)" ~/.claude/skills/unity-skills
+REPO="$(pwd)"
+for s in image-processor unity-sprite-slicer unity-animation-editor unity-prefab-tool import-asset; do
+  ln -s "$REPO/$s" "$HOME/.claude/skills/$s"
+done
+```
 
-# Or one at a time
-ln -s "$(pwd)/import-asset" ~/.claude/skills/import-asset
+If a skill of the same name already exists as a real directory, move it aside before symlinking so you do not lose local edits:
+
+```bash
+mkdir -p ~/.claude/skills_backup
+mv ~/.claude/skills/image-processor ~/.claude/skills_backup/image-processor.$(date +%Y%m%d) 2>/dev/null || true
+ln -s "$REPO/image-processor" ~/.claude/skills/image-processor
 ```
 
 After symlinking, Claude Code picks up the skills on the next session.
@@ -41,9 +48,12 @@ Each skill follows the same shape:
   references/       optional reference docs
 ```
 
-Scripts are zero-dependency where possible. The image-processor needs
-Pillow (and NumPy for color removal); everything else parses Unity's YAML
-with text + regex so there are no PyYAML or `unityparser` requirements.
+Scripts are minimal-dependency where possible. `image-processor` needs
+Pillow (and NumPy for color removal and mirror-copy). `unity-sprite-slicer`
+needs Pillow only for `--skip-empty` cell detection (pass `--no-skip-empty`
+to avoid it). `unity-prefab-tool` needs PyYAML. `unity-animation-editor`
+and `import-asset` parse Unity YAML with text + regex and have no external
+requirements.
 
 ## Composition
 
