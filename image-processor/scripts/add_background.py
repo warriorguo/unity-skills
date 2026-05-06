@@ -22,6 +22,11 @@ def parse_args():
     parser.add_argument("background", help="Background image path")
     parser.add_argument("output", help="Output image path")
     parser.add_argument(
+        "--no-resize",
+        action="store_true",
+        help="Do not resize the background; center it behind the foreground instead",
+    )
+    parser.add_argument(
         "--no-unity",
         action="store_true",
         help="Skip Unity .meta detection; treat as a plain image even if .meta exists",
@@ -78,12 +83,29 @@ def parse_unity_meta_sprites(meta_path):
     return results
 
 
-def composite_on_background(fg_img, bg_img):
-    """Paste foreground onto a resized copy of background, using fg alpha."""
-    bg = bg_img.resize(fg_img.size, Image.LANCZOS).convert("RGBA")
+def composite_on_background(fg_img, bg_img, no_resize=False):
+    """Paste foreground onto background, using fg alpha.
+
+    If no_resize is False (default), the background is resized to match the foreground.
+    If no_resize is True, the background is centered behind the foreground at its original size.
+    """
     fg = fg_img.convert("RGBA")
-    bg.paste(fg, (0, 0), fg)
-    return bg
+    fw, fh = fg.size
+
+    if no_resize:
+        bw, bh = bg_img.size
+        # Create a transparent canvas matching foreground size
+        canvas = Image.new("RGBA", (fw, fh), (0, 0, 0, 0))
+        # Center the background on the canvas
+        ox = (fw - bw) // 2
+        oy = (fh - bh) // 2
+        canvas.paste(bg_img.convert("RGBA"), (ox, oy))
+        canvas.paste(fg, (0, 0), fg)
+        return canvas
+    else:
+        bg = bg_img.resize((fw, fh), Image.LANCZOS).convert("RGBA")
+        bg.paste(fg, (0, 0), fg)
+        return bg
 
 
 def main():
@@ -125,15 +147,15 @@ def main():
             # Crop the foreground tile
             tile = fg_img.crop((pil_x, pil_y, pil_x + w, pil_y + h))
 
-            # Composite tile onto resized background
-            merged_tile = composite_on_background(tile, bg_img)
+            # Composite tile onto background
+            merged_tile = composite_on_background(tile, bg_img, no_resize=args.no_resize)
 
             # Paste back
             result.paste(merged_tile, (pil_x, pil_y))
             print(f"  Tile '{sp['name']}': ({pil_x},{pil_y}) {w}x{h}")
     else:
         # Plain image: composite entire foreground onto background
-        result = composite_on_background(fg_img, bg_img)
+        result = composite_on_background(fg_img, bg_img, no_resize=args.no_resize)
         print(f"Composited {img_w}x{img_h} foreground onto background")
 
     # Handle output format

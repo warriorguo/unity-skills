@@ -1,6 +1,6 @@
 ---
 name: image-processor
-description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF — including JPG↔PNG with EXIF-orientation correction and alpha flattening), remove a specific color from an image (make it transparent), adjust image opacity/transparency, rotate or flip images, or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "convert this jpg to png", "save as webp", "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", "make it semi-transparent", "rotate this image 90 degrees", "flip the image", or "add a background to this sprite".
+description: Process and manipulate images using Python PIL/Pillow. Use this skill whenever the user wants to resize images, get image info/metadata, check image dimensions/size/format/EXIF, scale images up or down, batch resize, convert between formats (PNG, JPG, WEBP, BMP, TIFF, GIF — including JPG↔PNG with EXIF-orientation correction and alpha flattening), remove a specific color from an image (make it transparent), adjust image opacity/transparency, rotate or flip images, mirror-copy regions within an image (diagonal or midline symmetry), or add/merge a background image behind a foreground. Supports Unity sprite sheets — auto-detects .meta and composites per-tile. Trigger this even for casual requests like "convert this jpg to png", "save as webp", "make this image smaller", "what size is this image", "show me the EXIF data", "remove the background color", "make it semi-transparent", "rotate this image 90 degrees", "flip the image", "mirror the top half", "copy along the diagonal", or "add a background to this sprite".
 ---
 
 # Image Processor
@@ -324,6 +324,62 @@ python <skill-path>/scripts/add_background.py spritesheet.png bg_texture.png spr
 Force plain mode even if .meta exists:
 ```bash
 python <skill-path>/scripts/add_background.py spritesheet.png bg.png out.png --no-unity
+```
+
+## Mirror Copy
+
+Use `scripts/mirror_copy.py` to mirror-copy a region within an image to its opposite side. Supports horizontal/vertical midlines and 45/135 degree diagonals. The target region is cleared first, then the source region is mirror-copied into it.
+
+### Usage
+
+```bash
+python <skill-path>/scripts/mirror_copy.py <input> <output> --axis <axis> --source <source>
+```
+
+### Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--axis AXIS` | **(Required)** Mirror axis: `horizontal` (top/bottom), `vertical` (left/right), `diagonal-45` (TL-BR), `diagonal-135` (TR-BL) | `--axis horizontal` |
+| `--source SRC` | **(Required)** Source region to keep and mirror-copy. Valid values depend on axis (see below) | `--source top` |
+| `--quality Q` | JPEG/WEBP quality 1-100 (default: 95) | `--quality 85` |
+
+### Axis-source combinations
+
+| Axis | Valid sources | Description |
+|------|-------------|-------------|
+| `horizontal` | `top`, `bottom` | Mirror along horizontal midline |
+| `vertical` | `left`, `right` | Mirror along vertical midline |
+| `diagonal-45` | `upper`, `lower` | Mirror along 45° diagonal (top-left to bottom-right). `upper` = top-right triangle, `lower` = bottom-left triangle |
+| `diagonal-135` | `upper`, `lower` | Mirror along 135° diagonal (top-right to bottom-left). `upper` = top-left triangle, `lower` = bottom-right triangle |
+
+### Behavior
+
+- The target region (opposite of source) is overwritten with a mirror-copy of the source region.
+- For diagonal axes on non-square images, the operation works on the square region `min(W,H) x min(W,H)` anchored at the top-left corner. Pixels outside this square are unchanged.
+- The fold line itself (diagonal or midline pixels) is preserved from the original image.
+- Output is RGBA. For JPEG output, auto-converts to RGB.
+
+### Examples
+
+Mirror top half to bottom:
+```bash
+python <skill-path>/scripts/mirror_copy.py sprite.png result.png --axis horizontal --source top
+```
+
+Mirror right half to left:
+```bash
+python <skill-path>/scripts/mirror_copy.py tile.png result.png --axis vertical --source right
+```
+
+Mirror along 45° diagonal — top-right triangle to bottom-left:
+```bash
+python <skill-path>/scripts/mirror_copy.py icon.png result.png --axis diagonal-45 --source upper
+```
+
+Mirror along 135° diagonal — bottom-right triangle to top-left:
+```bash
+python <skill-path>/scripts/mirror_copy.py icon.png result.png --axis diagonal-135 --source lower
 ```
 
 ## Important notes
