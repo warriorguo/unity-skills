@@ -14,18 +14,26 @@ All commands are run via `python3 scripts/sprite_slicer.py` from the `unity-spri
 ### `slice` - Slice a sprite into a grid
 
 ```bash
-python3 scripts/sprite_slicer.py slice <image_path> <rows> <cols>
+python3 scripts/sprite_slicer.py slice <image_path> <rows> <cols> [--no-skip-empty]
 ```
 
-Sets `spriteMode` to Multiple (2), `textureType` to Sprite (8), and generates `rows x cols` sprite entries in the `.meta` file.
+Sets `spriteMode` to Multiple (2), `textureType` to Sprite (8), and generates sprite entries for each non-empty cell of the grid in the `.meta` file.
+
+| Option | Description |
+|--------|-------------|
+| `--skip-empty` (default) | Skip fully-transparent cells (alpha == 0 across the whole region). Kept sprites are numbered consecutively. Requires Pillow. |
+| `--no-skip-empty` | Emit a sprite entry for every cell regardless of content (fixed-grid output). |
 
 Examples:
 ```bash
-# Slice a 256x256 spritesheet into 4x4 grid (16 sprites of 64x64)
+# Slice a 256x256 spritesheet into 4x4 grid (16 sprites of 64x64) — empty cells skipped
 python3 scripts/sprite_slicer.py slice Assets/Textures/character.png 4 4
 
 # Slice into 2 rows x 8 columns
 python3 scripts/sprite_slicer.py slice Assets/Textures/tileset.png 2 8
+
+# Force a sprite per cell, including transparent ones
+python3 scripts/sprite_slicer.py slice Assets/Textures/atlas.png 8 8 --no-skip-empty
 ```
 
 ### `inspect` - View current sprite settings
@@ -70,11 +78,11 @@ Sprites: 16
 
 ## Design Notes
 
-- **Zero dependencies**: No PyYAML or Pillow required. PNG dimensions are read via `struct` (IHDR chunk). Meta files are manipulated with text-level operations.
+- **Minimal dependencies**: PNG dimensions are read via `struct` (IHDR chunk) and meta files are manipulated with text-level operations — no PyYAML required. Pillow is required only for `--skip-empty` empty-cell detection; pass `--no-skip-empty` if Pillow is unavailable.
 - **Format preservation**: Only the modified fields (`spriteMode`, `textureType`, `sprites`) are changed. All other content in the `.meta` file is preserved exactly as-is.
 - **Unity 2022 compatible**: Generated sprite entries include all fields expected by Unity 2022 (rect, alignment, pivot, border, outline, physicsShape, tessellationDetail, bones, spriteID, internalID, vertices, indices, edges, weights).
 
 ## Requirements
 
 - Python 3.7+
-- No external dependencies
+- Pillow (only for `--skip-empty` empty-cell detection; `pip install Pillow`)

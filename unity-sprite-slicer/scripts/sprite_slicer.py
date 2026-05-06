@@ -6,6 +6,7 @@ Zero external dependencies: PNG dimensions parsed via struct, .meta files
 manipulated with text-level operations (no PyYAML).
 """
 
+import argparse
 import os
 import re
 import struct
@@ -89,14 +90,54 @@ def generate_sprite_entry(name, x, y, w, h, internal_id):
     return "\n".join(lines)
 
 
-def generate_sprites_block(image_name, img_w, img_h, rows, cols):
-    """Generate the complete sprites: block with rows*cols sprite entries.
+def detect_empty_cells(image_path, rows, cols, img_w, img_h):
+    """Return a set of (row, col) cell indices that are fully transparent.
+
+    Requires Pillow. Returns an empty set if the image has no alpha channel
+    (no cell can be considered empty without a transparency signal).
+    """
+    try:
+        from PIL import Image
+    except ImportError as e:
+        raise RuntimeError(
+            "--skip-empty requires Pillow. Install it with `pip install Pillow` "
+            "or pass --no-skip-empty to disable empty-cell detection."
+        ) from e
+
+    img = Image.open(image_path)
+    if img.mode not in ("RGBA", "LA") and "A" not in img.getbands():
+        # No alpha channel — every cell is implicitly "non-empty".
+        return set()
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    cell_w = img_w / cols
+    cell_h = img_h / rows
+    empty = set()
+    for r in range(rows):
+        for c in range(cols):
+            # PIL uses top-left origin; (r, c) in row-major order matches.
+            left = int(round(c * cell_w))
+            upper = int(round(r * cell_h))
+            right = int(round((c + 1) * cell_w))
+            lower = int(round((r + 1) * cell_h))
+            cell = img.crop((left, upper, right, lower))
+            alpha = cell.split()[3]
+            if alpha.getbbox() is None:
+                empty.add((r, c))
+    return empty
+
+
+def generate_sprites_block(image_name, img_w, img_h, rows, cols, empty_cells=None):
+    """Generate the complete sprites: block with sprite entries for non-empty cells.
 
     Coordinate system: Unity uses bottom-left origin.
     - sprite(r, c): x = c * cellW, y = imgH - (r+1) * cellH
     - Naming: {imageName}_{index}, index goes left-to-right, top-to-bottom
+      and skips empty cells (kept sprites are numbered consecutively).
     - internalID starts at 21300000, increments by 2
     """
+    empty_cells = empty_cells or set()
     cell_w = img_w / cols
     cell_h = img_h / rows
     entries = []
@@ -104,6 +145,8 @@ def generate_sprites_block(image_name, img_w, img_h, rows, cols):
     index = 0
     for r in range(rows):
         for c in range(cols):
+            if (r, c) in empty_cells:
+                continue
             name = f"{image_name}_{index}"
             x = c * cell_w
             y = img_h - (r + 1) * cell_h
@@ -121,6 +164,8 @@ def generate_sprites_block(image_name, img_w, img_h, rows, cols):
             entries.append(generate_sprite_entry(name, x, y, cell_w_out, cell_h_out, internal_id))
             internal_id += 2
             index += 1
+    if not entries:
+        return "    sprites: []"
     return "    sprites:\n" + "\n".join(entries)
 
 
@@ -211,19 +256,33 @@ def replace_sprites_block(content, new_block):
 # Phase 4: Commands
 # ---------------------------------------------------------------------------
 
-def cmd_slice(args):
+def cmd_slice(argv):
     """Slice a sprite image into a grid of rows x cols."""
-    if len(args) < 3:
-        print("Usage: slice <image_path> <rows> <cols>", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        prog="sprite_slicer.py slice",
+        description="Slice a sprite image into rows x cols.",
+    )
+    parser.add_argument("image_path")
+    parser.add_argument("rows", type=int)
+    parser.add_argument("cols", type=int)
+    parser.add_argument(
+        "--skip-empty",
+        dest="skip_empty",
+        action="store_true",
+        default=True,
+        help="Skip fully-transparent cells (default: on). Requires Pillow.",
+    )
+    parser.add_argument(
+        "--no-skip-empty",
+        dest="skip_empty",
+        action="store_false",
+        help="Emit a sprite for every cell, including fully-transparent ones.",
+    )
+    args = parser.parse_args(argv)
 
-    image_path = args[0]
-    try:
-        rows = int(args[1])
-        cols = int(args[2])
-    except ValueError:
-        print("Error: rows and cols must be integers", file=sys.stderr)
-        sys.exit(1)
+    image_path = args.image_path
+    rows = args.rows
+    cols = args.cols
 
     if rows < 1 or cols < 1:
         print("Error: rows and cols must be >= 1", file=sys.stderr)
@@ -247,6 +306,14 @@ def cmd_slice(args):
     cell_h = img_h / rows
     print(f"Cell size: {format_unity_number(cell_w)}x{format_unity_number(cell_h)}")
 
+    empty_cells = set()
+    if args.skip_empty:
+        try:
+            empty_cells = detect_empty_cells(image_path, rows, cols, img_w, img_h)
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # Read .meta file
     with open(meta_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -259,7 +326,9 @@ def cmd_slice(args):
 
     # Generate sprite entries
     image_name = os.path.splitext(os.path.basename(image_path))[0]
-    sprites_block = generate_sprites_block(image_name, img_w, img_h, rows, cols)
+    sprites_block = generate_sprites_block(
+        image_name, img_w, img_h, rows, cols, empty_cells=empty_cells
+    )
 
     # Replace sprites block
     content = replace_sprites_block(content, sprites_block)
@@ -270,7 +339,11 @@ def cmd_slice(args):
         f.write(content)
 
     total = rows * cols
-    print(f"Generated {total} sprite entries")
+    kept = total - len(empty_cells)
+    if args.skip_empty:
+        print(f"Skipped {len(empty_cells)} empty cell(s); generated {kept} sprite entries (of {total})")
+    else:
+        print(f"Generated {total} sprite entries")
     print(f"Updated: {meta_path}")
 
 
