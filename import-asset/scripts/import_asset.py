@@ -16,6 +16,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -234,6 +235,75 @@ def step_await_meta(args: dict, ctx: dict, dry_run: bool):
     )
 
 
+_META_TEMPLATES = {
+    # Audio clips (.wav/.ogg/.mp3) — mirrors what Unity 2022 writes for the
+    # existing SFX under Assets/Audio/SFX/.
+    "audio": """fileFormatVersion: 2
+guid: {guid}
+AudioImporter:
+  externalObjects: {{}}
+  serializedVersion: 7
+  defaultSettings:
+    serializedVersion: 2
+    loadType: 0
+    sampleRateSetting: 0
+    sampleRateOverride: 44100
+    compressionFormat: 1
+    quality: 1
+    conversionMode: 0
+    preloadAudioData: 0
+  platformSettingOverrides: {{}}
+  forceToMono: 0
+  normalize: 1
+  loadInBackground: 0
+  ambisonic: 0
+  3D: 1
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+""",
+    # ScriptableObject / other native .asset files.
+    "native": """fileFormatVersion: 2
+guid: {guid}
+NativeFormatImporter:
+  externalObjects: {{}}
+  mainObjectFileID: 11400000
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+""",
+}
+
+
+def step_author_meta(args: dict, ctx: dict, dry_run: bool):
+    """Hand-author a `.meta` with a fresh GUID when Unity isn't available.
+
+    Use instead of `await-meta` for asset kinds whose importer settings are
+    simple enough to write by hand (audio, native .asset), so headless imports
+    don't stall waiting for the Editor. Never overwrites an existing `.meta` —
+    a regenerated GUID would orphan every reference to the asset.
+    """
+    target = Path(render(args["path"], ctx))
+    importer = render(args.get("importer", "native"), ctx)
+    if importer not in _META_TEMPLATES:
+        raise PipelineError(
+            f"author-meta: unknown importer {importer!r}. "
+            f"Available: {', '.join(sorted(_META_TEMPLATES))}"
+        )
+    meta = Path(str(target) + ".meta")
+    print(f"[author-meta] {meta} ({importer})")
+    if dry_run:
+        return
+    if meta.exists():
+        print("  skip: .meta already present")
+        return
+    if not target.exists():
+        raise PipelineError(f"cannot author .meta — asset not found: {target}")
+    guid = uuid.uuid4().hex
+    meta.write_text(_META_TEMPLATES[importer].format(guid=guid))
+    print(f"  guid = {guid}")
+
+
 _GUID_RE = re.compile(r"^guid:\s*([a-fA-F0-9]+)\s*$", re.MULTILINE)
 
 
@@ -429,6 +499,7 @@ STEPS = {
     "copy": step_copy,
     "run-script": step_run_script,
     "await-meta": step_await_meta,
+    "author-meta": step_author_meta,
     "read-meta": step_read_meta,
     "read-subsprite-id": step_read_subsprite_id,
     "write-json": step_write_json,

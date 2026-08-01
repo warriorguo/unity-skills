@@ -40,7 +40,7 @@ shipped in their own tickets:
 | `leg-walk` | Resize → slice → Walk/Idle anim → ResourcesDB `anim/{id}_*` → LegData/ItemData/loot | implemented |
 | `leg-track` | Resize 128² → 1-frame Walk/Idle anim → ResourcesDB → LegData(track)/ItemData/loot | implemented |
 | `enemy-sprite` | Copy → slice → SpriteAnimationData → ResourcesDB `anim/{id}` → optional CharacterAnimConfig | implemented |
-| `sound-effect` | Copy to `Assets/Audio/SFX/` → await .meta → register in `SoundConfig.asset` | implemented |
+| `sound-effect` | Copy to `Assets/Audio/SFX/` → author AudioImporter .meta → register an `_sfxEntries` SfxEntry in `SoundConfig.asset` | implemented |
 | `effect-sprite` | Copy → slice → build `SpriteSheet{Name}.prefab` (matching the SpriteSheetSmoke template, inline `_frames`) → register `fx/{id}` in ResourcesDB. Output is FxSpawner-compatible. | implemented |
 
 Add a new type by dropping a new file under `pipelines/`. No code changes are
@@ -124,6 +124,21 @@ Asserts that `<path>.meta` exists. If it doesn't, the step fails with a
 clear instruction to open Unity (which generates `.meta` files on import) and
 then re-run the same command. Earlier steps are skipped via idempotency, so
 the pipeline simply resumes at this point.
+
+### `author-meta`
+
+```json
+{ "type": "author-meta", "path": "<path-to-asset>", "importer": "audio" }
+```
+
+Hand-authors `<path>.meta` with a freshly generated GUID, so headless imports
+don't stall waiting for the Unity Editor. Use it instead of `await-meta` for
+asset kinds whose importer settings are simple enough to write by hand.
+`importer` selects the template: `audio` (AudioImporter — `.wav`/`.ogg`/`.mp3`)
+or `native` (NativeFormatImporter — ScriptableObject `.asset`, the default).
+
+An existing `.meta` is never overwritten, not even with `--force`: a
+regenerated GUID would orphan every reference to the asset.
 
 ### `read-subsprite-id`
 

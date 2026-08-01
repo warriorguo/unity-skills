@@ -1,12 +1,15 @@
 {
   "name": "sound-effect",
-  "description": "Import an SFX audio file: copy under Assets/Audio/SFX/ preserving the source extension (.wav/.ogg/.mp3), wait for Unity to generate .meta, register the clip in SoundConfig.asset with default volume/pitch, and append a row to the SFX catalog.",
+  "description": "Import an SFX audio file: copy under Assets/Audio/SFX/ preserving the source extension (.wav/.ogg/.mp3), hand-author the AudioImporter .meta (no Unity needed), register the clip as an SfxEntry in SoundConfig.asset, and append a row to the SFX catalog.",
   "arguments": [
     { "name": "name", "required": true, "help": "Sound id (e.g. sfx_explosion). Used as soundId and filename stem." },
-    { "name": "volume", "type": "float", "default": 1.0, "help": "Default volume (0.0-1.0)" },
-    { "name": "pitch",  "type": "float", "default": 1.0, "help": "Default pitch multiplier" },
+    { "name": "volume",    "type": "float", "default": 1.0,  "help": "Playback volume (0.0-1.0)" },
+    { "name": "pitch-min", "type": "float", "default": 0.95, "help": "Lower bound of the random pitch range (0.8-1.2)" },
+    { "name": "pitch-max", "type": "float", "default": 1.05, "help": "Upper bound of the random pitch range (0.8-1.2)" },
+    { "name": "cooldown",  "type": "float", "default": 0.05, "help": "Minimum seconds between retriggers of this sound" },
+    { "name": "spatial",   "type": "int",   "default": 1, "choices": [0, 1], "help": "1 = 3D positional audio, 0 = 2D" },
     { "name": "audio-dir",    "default": "Assets/Audio/SFX", "help": "SFX directory" },
-    { "name": "sound-config", "default": "Assets/Resources/SoundConfig.asset", "help": "Path to SoundConfig.asset" },
+    { "name": "sound-config", "default": "Assets/Prefabs/System/SoundConfig.asset", "help": "Path to SoundConfig.asset" },
     { "name": "catalog",      "default": "Assets/Audio/SFXCatalog.md", "help": "Path to SFX catalog" }
   ],
   "steps": [
@@ -15,20 +18,24 @@
       "source": "{source}",
       "dest": "{unity_project}/{audio_dir}/{name}.{source_ext}"
     },
-    { "type": "await-meta", "path": "{unity_project}/{audio_dir}/{name}.{source_ext}" },
+    {
+      "type": "author-meta",
+      "path": "{unity_project}/{audio_dir}/{name}.{source_ext}",
+      "importer": "audio"
+    },
     { "type": "read-meta",  "path": "{unity_project}/{audio_dir}/{name}.{source_ext}", "guid_var": "audio_guid" },
     {
       "type": "text-insert",
       "path": "{unity_project}/{sound_config}",
-      "anchor": "(?m)^\\s*entries:\\s*$",
-      "marker": "soundId: {name}",
-      "insert": "\n    - soundId: {name}\n      clip: {fileID: 8300000, guid: {audio_guid}, type: 3}\n      volume: {volume}\n      pitch: {pitch}"
+      "anchor": "(?m)^\\s*_sfxEntries:\\s*$",
+      "marker": "soundId: {name}\n",
+      "insert": "\n  - soundId: {name}\n    clips:\n    - {fileID: 8300000, guid: {audio_guid}, type: 3}\n    volume: {volume}\n    pitchMin: {pitch_min}\n    pitchMax: {pitch_max}\n    cooldown: {cooldown}\n    spatial: {spatial}"
     },
     {
       "type": "md-append",
       "path": "{unity_project}/{catalog}",
-      "marker": "### {name}",
-      "content": "### {name}\n\n- File: `{audio_dir}/{name}.{source_ext}`\n- Defaults: volume={volume}, pitch={pitch}\n"
+      "marker": "### {name}\n",
+      "content": "### {name}\n\n- File: `{audio_dir}/{name}.{source_ext}`\n- Defaults: volume={volume}, pitch={pitch_min}-{pitch_max}, cooldown={cooldown}, spatial={spatial}\n"
     }
   ]
 }
